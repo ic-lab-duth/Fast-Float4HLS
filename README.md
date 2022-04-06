@@ -32,4 +32,9 @@ The operators +, -, *, +=, -=, *= compute the corresponding operation without su
 
 * Increase the output precision of dot product.
 * support rounding on dot product
+* Optimize the multiply operation
+
+# Examples
+
+* FIR filter
 
