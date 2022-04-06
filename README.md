@@ -31,7 +31,7 @@ Currently the overloaded operators +, -, *, +=, -=, *= compute the corresponding
 
 # Contributors
 
-Currently active: Dionysios Filippas, Giorgos Dimitrakopoulos
+Currently active: [Dionysios Filippas](https://github.com/dionisisfil), [Giorgos Dimitrakopoulos](https://github.com/gdimitrak)
 
 Past: Nikolaos Altanis
 
