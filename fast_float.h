@@ -83,6 +83,9 @@ public:
   
   // Constructors
   fast_float() {};
+  fast_float(const float &in) {
+    this->operator=(in);
+  };
 
   // Get 
   man_t get_mantissa() { return mantissa; }
@@ -97,7 +100,7 @@ public:
     // create significand
     ac_fixed<M+2,2,true> fix;
     fix[M+1] = 0;
-    fix[M] = 1;
+    fix[M] = ((mantissa== 0)&& (exponent==0)) ? 0 : 1;
     for (int i=0; i<M; i++)
       fix[i] = mantissa[i];
 
@@ -944,9 +947,7 @@ public:
 
   template<int N>
   void dotProd(fast_float<M,E> A[N], fast_float<M,E> B[N]) {
-#ifndef __SYNTHESIS__
-     std::cout << "\n*****************\nSTART DOT PRODUCT\n*****************\n" << std::endl;
-#endif
+
      bool AisInf[N], BisInf[N], AisZero[N], BisZero[N];
      sgn_t mulSign[N];
     
@@ -960,11 +961,13 @@ public:
 
       mulSign[i] = A[i].sign ^ B[i].sign;
     }
-
+    
+    ac_int<1,false> infSign;
     bool mulisInf[N];
     #pragma hls_unroll
     M_INFcheck: for (int i=0; i< N; i++) {
       mulisInf[i] = AisInf[i] | BisInf[i];
+      infSign =mulSign[i];
     }
 
     ac_int<M+1,false> fracA[N], fracB[N];
@@ -1002,30 +1005,30 @@ public:
     DO_MUL: for (int i=0; i<N; i++) {
       multiply(fracA[i], fracB[i], mul_prod[i]);
 
-      if (AisZero[i] || BisZero[i]) mul_prod[i] = 0;
+      if (AisZero[i] || BisZero[i])  {
+        mul_prod[i] = 0;
+        mul_exp_result[i] = 0;
+      }
           
 
       mul_overf[i] = mul_prod[i][mul_W-1];
       mul_prod[i] <<= !mul_overf[i];
 
       mul_exp_result[i] = (mul_overf[i]) ? mul_exp_overf[i] : mul_exp[i];
-      std::cout << mul_exp_result[i] << std::endl;
+
       if (mul_exp_result[i] > 255 ) {
         mul_exp_result[i] = 255;
         mulisInf[i] = true;
       }
-      if (mul_exp_result[i]<=0) {
+      if (mul_exp_result[i]<0) {
         mul_exp_result[i] = 0;
       }
       
-      bool mul_zero;
-      const int mul_prod_lz_cnt = (mul_prod[i]).leading_sign(mul_zero);
+      // bool mul_zero;
+      // const int mul_prod_lz_cnt = (mul_prod[i]).leading_sign(mul_zero);
+      // if (mul_zero) 
+      //   mul_exp_result[i] = 0;  
 
-
-      if (mul_zero) {
-        mul_exp_result[i] = 0;  
-      }   
-      std::cout << "exponent[" << i << "] = " << mul_exp_result[i] << std::endl;
     }
 
     // Start the addition
@@ -1041,11 +1044,8 @@ public:
       #pragma hls_unroll
       MAXE_V: for (int j=0; j<N; j++) {
         diffE[i][j] = (mul_exp_result[i]) - (mul_exp_result[j]);
-        std::cout << diffE[i][j] << " ";
       }
-      std::cout << std::endl;
     }
-    std::cout << std::endl;
     
     bool maxExp_OH[N];
     #pragma hls_unroll
@@ -1099,11 +1099,12 @@ public:
     res <<= lead_zer;
     mul_exp_result[0] -= (lead_zer);
     mul_exp_result[0] += (lead_zer==0) ? N-1 : N;
-
+   
+    std::cout << ((1 << (E)) -1) << std::endl;
 
     mantissa = (addisInf) ? (ac_int<M, false>)(0) : res.template slc<M>(M+N+1); 
-    exponent = (addisInf) ? (ac_int<E, false>)(255) : (ac_int<E, false>)(mul_exp_result[0].template slc<E>(0));
-    sign = res_sign;
+    exponent = (addisInf) ? (ac_int<E, false>)((1<<E) -1) : (ac_int<E, false>)(mul_exp_result[0].template slc<E>(0));
+    sign = (addisInf) ? infSign : res_sign;
     
 #ifndef __SYNTHESIS__
     std::cout << "sig= " << sign << std::endl;
@@ -1118,10 +1119,17 @@ public:
 
 // #ifndef __SYNTHESIS__
   void operator = (const float &inFP) {
-    ac_int<width,false> in= ((ac_ieee_float<binary32>)inFP).data_ac_int();
-    mantissa = in.template slc<M>(0);
-    exponent = in.template slc<E>(M);
-    sign = in[width-1];
+    ac_int<32,false> in= ((ac_ieee_float<binary32>)inFP).data_ac_int();
+    exponent = in.template slc<E>(23);
+    mantissa = (exponent==0) ? (man_t)0 : in.template slc<M>(23-M);
+    sign = (exponent==0) ? (sgn_t)0 : in[31];
+  }
+
+  void operator = (const double &inFP) {
+    ac_int<64,false> in= ((ac_ieee_float<binary64>)inFP).data_ac_int();
+    mantissa = in.template slc<M>(52-M);
+    exponent = in.template slc<E>(52);
+    sign = in[63];
   }
 // #endif
 
@@ -1172,6 +1180,10 @@ public:
   
   bool operator == (const fast_float<M,E> b) {
     return ((sign == b.sign) && (mantissa == b.mantissa) && (exponent == b.exponent));
+  }
+
+  bool operator != (const fast_float<M,E> b) {
+    return ((sign ^ b.sign) || (mantissa != b.mantissa) || (exponent != b.exponent));
   }
 
   bool operator >  (const fast_float<M,E> b) {
