@@ -86,15 +86,12 @@ public:
   fast_float(const float &in) {
     this->operator=(in);
   };
-
-  // Get 
-  man_t get_mantissa() { return mantissa; }
-  exp_t get_exponent() { return exponent; }
-  sgn_t get_sign()     { return sign;     }
-
-  
   
 // #ifndef __SYNTHESIS__
+  /*
+  * .to_float() is a non-synthesizable function that
+  * is used for converting the fast_float into a c++ float
+  */
   float to_float() {
 
     // create significand
@@ -131,9 +128,13 @@ public:
 
   /** FLOATING POINT OPERATIONS **/
 
-  // Floating Point Addition
+  /* Floating Point Addition
+  *  adds the value of 'a' to this fast_float and
+  *  return the result to the 'output'. 
+  *  The addition is implemented using dual path (Far-Near).
+  */
   template<RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
-  void fpa_dual(fast_float<M,E> a, fast_float<M,E> &output, bool &invalid) {
+  void fpa_dual(fast_float<M,E> a, fast_float<M,E> &output) {
   
     // Set create needed lengths.
     const int signif_uniform_W = M + 4;
@@ -481,15 +482,22 @@ public:
     if (R_exp_result.and_reduce() & Is_R) {
 		Is_inf = true;	
     }
+
+    sgn_t tmp_s = (Is_inf) ? inf_sign                      : ((Is_R) ? R_sign_large  : N_sign_large);
+    man_t tmp_m = (Is_inf) ? ac_int<M,false>(0)            : ((Is_R) ? R_magn_result : N_chosen_sub.template slc<M>(2));
+    exp_t tmp_e = (Is_inf) ? ac_int<E,false>((1 << E) - 1) : ((Is_R) ? R_exp_result  : N_exp_large);
+
+    sgn_t tmp_s_A = (in_1_subnorm) ? a.sign     : (sgn_t)0;
+    man_t tmp_m_A = (in_1_subnorm) ? a.mantissa : (man_t)0;
+    exp_t tmp_e_A = (in_1_subnorm) ? a.exponent : (exp_t)0;
+
+    sgn_t tmp_s_B = (in_2_subnorm) ? sign     : (sgn_t)0;
+    man_t tmp_m_B = (in_2_subnorm) ? mantissa : (man_t)0;
+    exp_t tmp_e_B = (in_2_subnorm) ? exponent : (exp_t)0;
  
-    output.sign     = (Is_inf) ? inf_sign                      : ((Is_R) ? R_sign_large  : N_sign_large);
-    output.exponent = (Is_inf) ? ac_int<E,false>((1 << E) - 1) : ((Is_R) ? R_exp_result  : N_exp_large);
-    output.mantissa = (Is_inf) ? ac_int<M,false>(0)            : ((Is_R) ? R_magn_result : N_chosen_sub.template slc<M>(2));
-    
-    // boolean flag that informs about denormal numbers when 
-    // denormals are not supported by template
-    // when TRUE, a denormalized input leads to an invalid result
-    invalid = (DENORMALS) ? false : (((in_1_subnorm | in_2_subnorm) == 1) ? true : false);
+    output.sign     = (DENORMALS) ? tmp_s : ((in_1_subnorm) ? tmp_s_A : ((in_2_subnorm) ? tmp_s_B : tmp_s));
+    output.exponent = (DENORMALS) ? tmp_e : ((in_1_subnorm) ? tmp_e_A : ((in_2_subnorm) ? tmp_e_B : tmp_e));
+    output.mantissa = (DENORMALS) ? tmp_m : ((in_1_subnorm) ? tmp_m_A : ((in_2_subnorm) ? tmp_m_B : tmp_m));
   }
   
 
@@ -534,20 +542,23 @@ public:
     // Calculate exponent result 
     static const ac_int<E,false> mul_exp_base = (1 << (E-1)) - 1;
     static const ac_int<E,false> mul_exp_base_min_1 = (1 << (E-1)) - 2;
-    const ac_int<E+1,true> mul_exp_overf = exponent + a.exponent - mul_exp_base_min_1;
-    const ac_int<E+1,true> mul_exp = exponent + a.exponent - mul_exp_base;
+    const ac_int<E+2,true> mul_exp_overf = exponent + a.exponent - mul_exp_base_min_1;
+    const ac_int<E+2,true> mul_exp = exponent + a.exponent - mul_exp_base;
 
     // Do the multiplication.
     static const int mul_input_W = M + 1;
     static const int mul_W = (mul_input_W) << 1;
     
-    ac_int<mul_W,false> mul_prod;
+    ac_int<mul_W,false> mul_prod1, mul_prod;
     
-    multiply(mul_signif_a, mul_signif_b, mul_prod);
+    multiply(mul_signif_a, mul_signif_b, mul_prod1);
+
+    mul_prod = (DENORMALS) ? mul_prod1 : ((a_denorm || b_denorm) ? (ac_int<mul_W,false>)0 : mul_prod1);
     
     ac_int<1,false> mul_overf = mul_prod[mul_W-1];
     mul_prod <<= !mul_overf;
-    ac_int<E+1,true> mul_exp_result = (mul_overf) ? mul_exp_overf : mul_exp;
+    ac_int<E+3,true> mul_exp_result1 = (mul_overf) ? mul_exp_overf : mul_exp;
+    ac_int<E+3,true> mul_exp_result  = (DENORMALS) ? mul_exp_result1 : ((a_denorm || b_denorm) ? (ac_int<E+3,true>)0 : mul_exp_result1);
     
     bool mul_zero = false;
     const int mul_prod_lz_cnt = (mul_prod).leading_sign(mul_zero);
@@ -582,11 +593,10 @@ public:
 
     // Compute exponent difference.
 
-    const ac_int<E + 2,true> Far_exp_diff_1 = mul_exp_result - b.exponent;
-    const ac_int<E + 2,true> Far_exp_diff_2 = b.exponent - mul_exp_result;
-    
+    const ac_int<E + 3,true> Far_exp_diff_1 = mul_exp_result - b.exponent;
+    const ac_int<E + 3,true> Far_exp_diff_2 = b.exponent - mul_exp_result;
 
-    ac_int<E+1,false> Far_abs_exp_diff;// = (sel) ? Far_exp_diff_1.template slc<E+1>(0) : Far_exp_diff_2.template slc<E+1>(0);
+    ac_int<E+2,false> Far_abs_exp_diff;// = (sel) ? Far_exp_diff_1.template slc<E+1>(0) : Far_exp_diff_2.template slc<E+1>(0);
       
     // Initialize swap variables.
 
@@ -602,7 +612,7 @@ public:
     
     // Swap and allign.
 
-    if (!Far_exp_diff_1[E+1]) {
+    if (!Far_exp_diff_1[E+2]) {
 
         Far_nsignif_large = mul_prod;
         Far_exp_large = mul_exp_result;
@@ -611,7 +621,7 @@ public:
         Far_abs_exp_diff = Far_exp_diff_1.template slc<E+1>(0);
         Far_large_is_mul = 1;
 
-    } else if (!Far_exp_diff_2[E+1]) {
+    } else if (!Far_exp_diff_2[E+2]) {
 
         Far_nsignif_large = add_signif_c;
         Far_exp_large = b.exponent;
@@ -674,7 +684,7 @@ public:
       Far_sum >>= 1;
       Far_sum[0] = Far_sum[0] | Far_sticky_hold;
       Far_exp_result = Far_exp_large_overf;
-      
+
     } else if (!Far_sum[mul_W-1]) {
       
       Far_sum <<= 1;
@@ -683,7 +693,7 @@ public:
     } else {
       
       Far_exp_result = Far_exp_large;
-      
+
     }
 
     
@@ -795,8 +805,8 @@ public:
 
     add_is_inf = (Final_exp_result >= ((1 << E) - 1)) ? true : add_is_inf;
     
-    
     const ac_int<1,false> inf_sign = (t_in_b_is_inf) ? b.sign : mul_sign;
+
     
     output.sign = (add_is_inf) ? inf_sign : Chosen_sign_result;
     output.exponent = (add_is_inf) ? (ac_int<E+1, false>)((1 << E) - 1) : Final_exp_result;
@@ -1100,7 +1110,6 @@ public:
     mul_exp_result[0] -= (lead_zer);
     mul_exp_result[0] += (lead_zer==0) ? N-1 : N;
    
-    std::cout << ((1 << (E)) -1) << std::endl;
 
     mantissa = (addisInf) ? (ac_int<M, false>)(0) : res.template slc<M>(M+N+1); 
     exponent = (addisInf) ? (ac_int<E, false>)((1<<E) -1) : (ac_int<E, false>)(mul_exp_result[0].template slc<E>(0));
@@ -1141,8 +1150,7 @@ public:
 
   fast_float<M, E> operator + (const fast_float<M, E> &b) {
     fast_float<M, E> r;
-    bool x;
-    fpa_dual(b,r,x);
+    fpa_dual(b,r);
     return r;
   }
 
