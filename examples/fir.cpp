@@ -1,3 +1,8 @@
+// Copyright 2022 Democritus University of Thrace
+// Integrated Circuits Lab
+// 
+// Example using Fast-Float4HLS to build an FIR filter
+#include <iostream>
 #include "fast_float.h"
 #include "mc_scverify.h"
 

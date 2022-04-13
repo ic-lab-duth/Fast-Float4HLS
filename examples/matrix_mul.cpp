@@ -1,3 +1,7 @@
+// Copyright 2022 Democritus University of Thrace
+// Integrated Circuits Lab
+// 
+// Example using Fast-Float4HLS to build Matrix-Vector & Matrix-Matrix multiplication
 #include <iostream>
 #include "fast_float.h"
 #include "mc_scverify.h"
@@ -53,7 +57,7 @@ void CCS_BLOCK(matXmat) (T A[N][M], T B[M][K], T O[N][K]) {
 
 CCS_MAIN(int, char**) {
   
-  const int N=8, M=8, K=4;
+  const int N=4, M=4, K=2;
 
   T A[N][M], B[M][K], V[M], OV[N], OM[N][K];
 

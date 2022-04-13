@@ -1,3 +1,9 @@
+// Copyright 2022 Democritus University of Thrace
+// Integrated Circuits Lab
+// 
+// Fast-Float4HLS v1.0
+// -------------------
+// Floating Point Library of fast operators for High Level Synthesis
 #ifndef __FASTFLOAT_H__
 #define __FASTFLOAT_H__
 
