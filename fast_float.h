@@ -580,7 +580,7 @@ public:
     const ac_int<1,false> add_eff_sign = mul_sign ^ b.sign;
     
     // Create add significant.
-    ac_int<mul_W,false> add_signif_c = b.mantissa;
+    ac_int<mul_W,false> add_signif_c = (DENORMALS) ? b.mantissa : ((c_denorm) ? (man_t)0 : b.mantissa);
     
     add_signif_c[M] = (DENORMALS) ? ((c_denorm) ? 0 : 1) : 1;
     
@@ -825,11 +825,13 @@ public:
     ac_int<1,false> is_a_subnormal = (exponent == 0);
     ac_int<1,false> is_c_subnormal = (a.exponent == 0);
     
-    mul_signif_a[M] = (is_a_subnormal) ? 0 : 1;
-    mul_signif_c[M] = (is_c_subnormal) ? 0 : 1;
+    mul_signif_a[M] = (DENORMALS) ? ((is_a_subnormal) ? 0 : 1) : 1;
+    mul_signif_c[M] = (DENORMALS) ? ((is_c_subnormal) ? 0 : 1) : 1;
     
-    mul_signif_a <<= is_a_subnormal;
-    mul_signif_c <<= is_c_subnormal;
+    if (DENORMALS) {
+      mul_signif_a <<= is_a_subnormal;
+      mul_signif_c <<= is_c_subnormal;
+    }
     
     // Infinity Check.
     
@@ -848,7 +850,8 @@ public:
     
     ac_int<mul_W,false> mul_res;
     multiply(mul_signif_a,mul_signif_c,mul_res);
-    ac_int<mul_W+1,false> mul_prod = mul_res;
+
+    ac_int<mul_W+1,false> mul_prod = (DENORMALS) ? mul_res : ((is_a_subnormal || is_c_subnormal) ? (ac_int<mul_W,false>)0 : mul_res);
 
     mul_prod <<= 1;
     
@@ -864,14 +867,19 @@ public:
     // Create mul_prod_normalizer witch has M more LSBs 
     // to keep shifted out sticky bits in case of subnormal result.
     
-    ac_int<mul_W+M+2,false> mul_prod_normalizer = mul_prod.template slc<mul_W>(0);
-    mul_prod_normalizer <<= M+2;
+    // ac_int<mul_W+M+2,false> mul_prod_normalizer = mul_prod.template slc<mul_W>(0);
+    // mul_prod_normalizer <<= M+2;
     
+    ac_int<mul_W,false> mul_prod_normalizer = mul_prod.template slc<mul_W>(0);
+
+    //TODO: MUL NEEDS LEADING ZEROS?????
+
     // Normalization.
     
     bool mul_zero = false;
     const bool pos_exp = (mul_pos_exp_result >= 0);
-    const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = (mul_prod_normalizer.template slc<mul_W>(M+2)).leading_sign(mul_zero);
+    // const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = (mul_prod_normalizer.template slc<mul_W>(M+2)).leading_sign(mul_zero);
+    const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mul_prod_normalizer.leading_sign(mul_zero);
     
     if (mul_zero) {
       
@@ -911,7 +919,10 @@ public:
     
     // Injection Rounding.
     
-    static const int mul_inj_point = mul_W + 1;
+    static const int mul_inj_point = M + 1;
+    // ac_int<1,false> mul_round = mul_prod_normalizer[mul_inj_point-1] & ((mul_prod_normalizer[mul_inj_point]) 
+    //               | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+    
     ac_int<1,false> mul_round = mul_prod_normalizer[mul_inj_point-1] & ((mul_prod_normalizer[mul_inj_point]) 
                   | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
                   
@@ -1115,11 +1126,11 @@ public:
     exponent = (addisInf) ? (ac_int<E, false>)((1<<E) -1) : (ac_int<E, false>)(mul_exp_result[0].template slc<E>(0));
     sign = (addisInf) ? infSign : res_sign;
     
-#ifndef __SYNTHESIS__
-    std::cout << "sig= " << sign << std::endl;
-    std::cout << "exp= " << exponent << std::endl;
-    std::cout << "man= " << mantissa << std::endl;
-#endif
+// #ifndef __SYNTHESIS__
+//     std::cout << "sig= " << sign << std::endl;
+//     std::cout << "exp= " << exponent << std::endl;
+//     std::cout << "man= " << mantissa << std::endl;
+// #endif
     
   }
 
@@ -1284,10 +1295,13 @@ public:
 
 };
 
-
-typedef fast_float<52,11> ffp64;  // double-precission IEEE754 float
-typedef fast_float<23,8>  ffp32;  // single-precission IEEE754 float
-typedef fast_float<10,5>  ffp16;  // half-precission IEEE754 float
-typedef fast_float<7, 8>  ffp16b; // bfloat16
+// double-precission IEEE754 
+typedef fast_float<52,11> ffp64;  
+// single-precission IEEE754 
+typedef fast_float<23,8>  ffp32;  
+// half-precission IEEE754 
+typedef fast_float<10,5>  ffp16;  
+// bfloat16
+typedef fast_float<7, 8>  ffp16b; 
 
 #endif
