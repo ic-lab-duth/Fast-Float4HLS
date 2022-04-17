@@ -9,6 +9,15 @@ For example:
 
 Fast-Float4HLS is based on ac_int and ac_std_float libraries that are available in [HLSLibs](https://github.com/hlslibs/ac_types).
 
+The execution of the given examples require the inclusion of mc_scverify library that is available in [ac_simutils](https://github.com/hlslibs/ac_simutils/tree/master/include).
+
+The installation of the required libraries can be done by downloading the code from the links above or by running the set_libs.sh script, that downloads the libraries on the working directory, or by using the following commands:
+
+```console
+git clone http://github.com/hlslibs/ac_types.git
+git clone http://github.com/hlslibs/ac_simutils.git
+```
+
 # Supported Operators
 
 * Addition
@@ -37,3 +46,4 @@ Past: Nikolaos Altanis
 
 # License
 Fast-Float4HLS is licensed with the MIT License. You are completely free to re-distribute your work derived from Fast-Float4HLS
+
