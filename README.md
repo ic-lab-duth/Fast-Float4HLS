@@ -7,7 +7,7 @@ For example:
 * fast_float<52,11> is used for the double precision representation.
 * fast_float<7,8>  is used for the representation of Brain Floating Point, bfloat16, developed by Google Brain.
 
-Fast-Float4HLS is based on ac_int and ac_std_float libraries that are available in [HLSLibs](https://github.com/hlslibs/ac_types).
+Fast-Float4HLS is based on ac_fixed library that is available in [HLSLibs](https://github.com/hlslibs/ac_types).
 
 The execution of the given examples require the inclusion of mc_scverify library that is available in [ac_simutils](https://github.com/hlslibs/ac_simutils/tree/master/include).
 
