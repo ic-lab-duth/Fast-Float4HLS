@@ -11,12 +11,14 @@ Fast-Float4HLS is based on ac_int and ac_std_float libraries that are available 
 
 The execution of the given examples require the inclusion of mc_scverify library that is available in [ac_simutils](https://github.com/hlslibs/ac_simutils/tree/master/include).
 
-The installation of the required libraries can be done by downloading the code from the links above or by running the set_libs.sh script, that downloads the libraries on the working directory, or by using the following commands:
+The installation of the required libraries can be done by downloading the code from the links above or by running the ```set_libs.sh``` script, that downloads the libraries on the working directory, or by using the following commands:
 
 ```console
 git clone http://github.com/hlslibs/ac_types.git
 git clone http://github.com/hlslibs/ac_simutils.git
 ```
+
+GCN example refers to the inference of a Graph Convolutional Network for node classification, using the Citeseer dataset as provided by Thomas Kipf [here](https://github.com/tkipf/gcn/tree/master/gcn/data).
 
 # Supported Operators
 
