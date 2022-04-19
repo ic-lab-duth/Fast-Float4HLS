@@ -7,8 +7,7 @@
 #ifndef __FASTFLOAT_H__
 #define __FASTFLOAT_H__
 
-#include <ac_int.h>
-#include <ac_std_float.h>
+#include <ac_fixed.h>
 
 template<int M, int E>
 class fast_float {
@@ -103,13 +102,13 @@ public:
     // create significand
     ac_fixed<M+2,2,true> fix;
     fix[M+1] = 0;
-    fix[M] = ((mantissa== 0)&& (exponent==0)) ? 0 : 1;
+    fix[M] = ((mantissa== 0) && (exponent==0)) ? 0 : 1;
     for (int i=0; i<M; i++)
       fix[i] = mantissa[i];
 
     // create 2^exp
-    float exp= (exponent < 127) ? 0.5 : 2;
-    int iter = (exponent < 127) ? e_bias - exponent : exponent - e_bias;
+    float exp= (exponent < e_bias) ? 0.5 : 2;
+    int iter = (exponent < e_bias) ? e_bias - exponent : exponent - e_bias;
     float e = 1;
     for (int i=0; i< iter; i++) 
       e *= exp;
@@ -120,7 +119,7 @@ public:
     // compute float number
     float fo = sg*((float)fix.to_double())*e;
 
-    if (exponent==255) {
+    if (exponent==((e_bias<<1)+1)) {
       if (mantissa ==0) {
         return (sign == 0) ? INFINITY : -INFINITY;
       } else {
@@ -1131,33 +1130,46 @@ public:
     mantissa = (addisInf) ? (ac_int<M, false>)(0) : res.template slc<M>(M+N+1); 
     exponent = (addisInf) ? (ac_int<E, false>)((1<<E) -1) : (ac_int<E, false>)(mul_exp_result[0].template slc<E>(0));
     sign = (addisInf) ? infSign : res_sign;
-    
-// #ifndef __SYNTHESIS__
-//     std::cout << "sig= " << sign << std::endl;
-//     std::cout << "exp= " << exponent << std::endl;
-//     std::cout << "man= " << mantissa << std::endl;
-// #endif
-    
+        
   }
 
   
   // OVERLOAD OPERATORS
 
-// #ifndef __SYNTHESIS__
   void operator = (const float &inFP) {
-    ac_int<32,false> in= ((ac_ieee_float<binary32>)inFP).data_ac_int();
-    exponent = in.template slc<E>(23);
-    mantissa = (exponent==0) ? (man_t)0 : in.template slc<M>(23-M);
-    sign = (exponent==0) ? (sgn_t)0 : in[31];
+    
+    unsigned int* ptr = (unsigned int*)&inFP;
+    
+    // find sign
+    int s = *ptr >> 31;
+    sign = (sgn_t)s;
+    
+    // find exponent
+    int e = *ptr & 0x7f800000;
+    e >>= 23;
+    e -= 127;
+    e += e_bias;
+    exponent = (e>(1<<E)-1) ? (exp_t)((1<<E)-1) : (e<0) ? (exp_t)0 : (exp_t)e;
+
+    // find mantissa
+    int m = *ptr & 0x007fffff;
+    mantissa = ((e>(1<<E)-1) || e<=0) ? (man_t)0 : ((M>23) ? (man_t)((long)m<<(M-23)) : (man_t)(m>>(23-M)));
+  
+
   }
 
-  void operator = (const double &inFP) {
-    ac_int<64,false> in= ((ac_ieee_float<binary64>)inFP).data_ac_int();
-    mantissa = in.template slc<M>(52-M);
-    exponent = in.template slc<E>(52);
-    sign = in[63];
-  }
-// #endif
+  /*void operator = (const double &inFP) {
+    unsigned long* ptr = (unsigned long*)&inFP;
+
+    int s = *ptr >> 63;
+    int e = (*ptr & 0x7ff0000000000000)>>52;
+    long m = *ptr & 0xfffffffffffff;
+
+    sign = (sgn_t)s;
+    exponent = (e>(1<<E)-1) ? (exp_t)((1<<E)-1) : (exp_t)e;
+    mantissa = (man_t)(m>>(52-M));
+    
+  }*/
 
   void operator = (const fast_float<M,E> &in) {
     mantissa = in.mantissa;
@@ -1212,91 +1224,19 @@ public:
   }
 
   bool operator >  (const fast_float<M,E> b) {
-    if (sign <= b.sign){
-      if (sign < b.sign) {
-        return true;
-      } else {
-        if (exponent >= b.exponent) {
-          if (exponent == b.exponent) {
-            if (mantissa > b.mantissa) {
-              return true;
-            } else {
-              return false;
-            }
-          } else {
-            return true;
-          }
-        } else {
-          return false;
-        }
-      }
-    } else {
-      return false;
-    }
+    return (sign < b.sign || (sign==b.sign && (exponent>b.exponent || (exponent==b.exponent && mantissa>b.mantissa))));
   }
 
   bool operator <  (const fast_float<M,E> b) {
-    if (sign >= b.sign){
-      if (sign > b.sign) {
-        return true;
-      } else {
-        if (exponent <= b.exponent) {
-          if (exponent == b.exponent) {
-            if (mantissa < b.mantissa) {
-              return true;
-            } else {
-              return false;
-            }
-          } else {
-            return true;
-          }
-        } else {
-          return false;
-        }
-      }
-    } else {
-      return false;
-    }
+    return (sign > b.sign || (sign==b.sign && (exponent<b.exponent || (exponent==b.exponent && mantissa<b.mantissa))));
   }
 
   bool operator >= (const fast_float<M,E> b) {
-    if (sign <= b.sign){
-      if (exponent >= b.exponent) {
-        if (exponent == b.exponent) {
-          if (mantissa >= b.mantissa) {
-            return true;
-          } else {
-            return false;
-          }
-        } else {
-          return true;
-        }
-      } else {
-        return false;
-      }
-    } else {
-      return false;
-    }
+    return (sign <= b.sign && exponent>=b.exponent && mantissa>=b.mantissa);
   }
 
   bool operator <= (const fast_float<M,E> b) {
-    if (sign >= b.sign){
-      if (exponent <= b.exponent) {
-        if (exponent == b.exponent) {
-          if (mantissa <= b.mantissa) {
-            return true;
-          } else {
-            return false;
-          }
-        } else {
-          return true;
-        }
-      } else {
-        return false;
-      }
-    } else {
-      return false;
-    }
+    return (sign >= b.sign && exponent<=b.exponent && mantissa<=b.mantissa);
   }
 
 };
