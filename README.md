@@ -18,8 +18,6 @@ git clone http://github.com/hlslibs/ac_types.git
 git clone http://github.com/hlslibs/ac_simutils.git
 ```
 
-GCN example refers to the inference of a Graph Convolutional Network for node classification, using the Citeseer dataset as provided by Thomas Kipf [here](https://github.com/tkipf/gcn/tree/master/gcn/data).
-
 # Supported Operators
 
 * Addition
