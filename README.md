@@ -7,7 +7,7 @@ For example:
 * fast_float<52,11> is used for the double precision representation.
 * fast_float<7,8>  is used for the representation of Brain Floating Point, bfloat16, developed by Google Brain.
 
-Fast-Float4HLS depends only ac_fixed library that is available in [HLSLibs](https://github.com/hlslibs/ac_types).
+Fast-Float4HLS depends only on ac_fixed library that is available in [HLSLibs](https://github.com/hlslibs/ac_types).
 
 Also the post-synthesis RTL co-simultion of the given examples require the sc_verify flow of Catapult HLS. The necessary header 
 (mc_scverify) is publicly available in [ac_simutils](https://github.com/hlslibs/ac_simutils/tree/master/include).
