@@ -33,11 +33,23 @@ CCS_MAIN(int argc, char** argv) {
   std::vector< std::vector<float> > W1;
   std::vector< std::vector<float> > W2;
 
-  // read input matrices from txt files
+  // read input matrices from txt files for citeseer
   read_adj<float, N, nZ>(a_row, a_col, a_val, "./matrices/citeseer_adj.txt");
   read_data<float, N, I_F1>(h, "./matrices/citeseer_feat.txt");
   read_data<float, I_F1, O_F1>(W1, "./matrices/citeseer_weights.txt");
   read_data<float, O_F1, O_F2>(W2, "./matrices/citeseer_weights2.txt");
+
+/*  // read input matrices from txt files for cora
+  read_adj<float, N, nZ>(a_row, a_col, a_val, "./matrices/cora_adj.txt");
+  read_data<float, N, I_F1>(h, "./matrices/cora_feat.txt");
+  read_data<float, I_F1, O_F1>(W1, "./matrices/cora_weights.txt");
+  read_data<float, O_F1, O_F2>(W2, "./matrices/cora_weights2.txt");*/
+
+/*  // read input matrices from txt files for pubmed
+  read_adj<float, N, nZ>(a_row, a_col, a_val, "./matrices/pubmed_adj.txt");
+  read_data<float, N, I_F1>(h, "./matrices/pubmed_feat.txt");
+  read_data<float, I_F1, O_F1>(W1, "./matrices/pubmed_weights.txt");
+  read_data<float, O_F1, O_F2>(W2, "./matrices/pubmed_weights2.txt");*/
 
   
   btype w_tile[K][M];
