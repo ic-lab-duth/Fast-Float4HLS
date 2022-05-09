@@ -1,2 +1,2 @@
 ### Graph Convolutional Network
-GCN example refers to the inference of a Graph Convolutional Network for node classification, using the Citeseer dataset as provided by Thomas Kipf [here](https://github.com/tkipf/gcn/tree/master/gcn/data).
+GCN example refers to the inference of a Graph Convolutional Network for node classification, using the Cora, Citeseer or Pubmed dataset as provided by Thomas Kipf [here](https://github.com/tkipf/gcn/tree/master/gcn/data). All the changes that have to be done to change dataset are predifened and commented in "defs.h" and "gcn_tb.cpp", respectively. The only the change needed is to uncomment the desired part of code.
