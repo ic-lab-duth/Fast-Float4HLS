@@ -8,6 +8,7 @@
 #define __FASTFLOAT_H__
 
 #include <ac_fixed.h>
+#include <ac_std_float.h>
 
 template<int M, int E>
 class fast_float {
@@ -92,20 +93,37 @@ public:
     this->operator=(in);
   };
   
-// #ifndef __SYNTHESIS__
   /*
   * .to_float() is a non-synthesizable function that
   * is used for converting the fast_float into a c++ float
   */
   float to_float() {
+    
+    ac_int<width,false> data;
+    for (int i=0; i<M; i++)
+      data[i] = mantissa[i];
+    
+    for (int i=0; i<E; i++)
+      data[M+i] = exponent[i];
 
+    data[M+E] = sign;
+    
+    
+    ac_std_float<width,E> ieee_data;
+    ieee_data.set_data(data);
+    return ieee_data.to_float();
+    
+    /*
     // create significand
-    ac_fixed<M+2,2,true> fix;
-    fix[M+1] = 0;
+    ac_fixed<M+1,2,false> fix;
+    //fix[M+1] = 0;
     fix[M] = ((mantissa== 0) && (exponent==0)) ? 0 : 1;
     for (int i=0; i<M; i++)
       fix[i] = mantissa[i];
-
+    
+    for (int i=0; i<M; i++)
+      std::cout << mantissa[M-1-i];
+    std::cout << std::endl;
     // create 2^exp
     float exp= (exponent < e_bias) ? 0.5 : 2;
     int iter = (exponent < e_bias) ? e_bias - exponent : exponent - e_bias;
@@ -127,9 +145,8 @@ public:
       }
     } else {
       return fo;
-    }
+    }*/
   }
-// #endif
 
   /** FLOATING POINT OPERATIONS **/
 
@@ -531,10 +548,6 @@ public:
 
     const ac_int<1,false> a_and_b_denorm = a_denorm & b_denorm;
     const ac_int<1,false> a_or_b_denorm = a_denorm ^ b_denorm;
-
-    //const ac_int<1,false> mul_and_c_denorm = in_1_subnorm & c_denorm;
-    //const ac_int<1,false> mul_or_c_denorm = in_1_subnorm ^ c_denorm;
-
     
     mul_signif_a[M] = (DENORMALS) ? ((a_denorm) ? 0 : 1) : 1;
     mul_signif_b[M] = (DENORMALS) ? ((b_denorm) ? 0 : 1) : 1;
@@ -601,7 +614,7 @@ public:
     const ac_int<E + 3,true> Far_exp_diff_1 = mul_exp_result - b.exponent;
     const ac_int<E + 3,true> Far_exp_diff_2 = b.exponent - mul_exp_result;
 
-    ac_int<E+2,false> Far_abs_exp_diff;// = (sel) ? Far_exp_diff_1.template slc<E+1>(0) : Far_exp_diff_2.template slc<E+1>(0);
+    ac_int<E+2,false> Far_abs_exp_diff;
       
     // Initialize swap variables.
 
@@ -770,8 +783,6 @@ public:
     static const int inj_point = M + 1;
     
     ac_int<1,false> round;
-    // ac_int<1,false> round = Chosen_signif_result[inj_point-1] & 
-            // (Chosen_signif_result[inj_point] | (Chosen_signif_result.template slc<inj_point-1>(0)).or_reduce() /*Chosen_signif_result[inj_point-2]*/ | Chosen_sticky);
     switch (RND_MODE) {
       
       case EVEN:
@@ -814,13 +825,13 @@ public:
 
     
     output.sign = (add_is_inf) ? inf_sign : Chosen_sign_result;
-    output.exponent = (add_is_inf) ? (ac_int<E+1, false>)((1 << E) - 1) : Final_exp_result;
-    output.mantissa = (add_is_inf) ? (ac_int<M+2, false>)0 : Final_signif_result;
+    output.exponent = (add_is_inf) ? (exp_t)((1 << E) - 1) : Final_exp_result.template slc<E>(0);
+    output.mantissa = (add_is_inf) ? (man_t)0 : Final_signif_result.template slc<M>(0);
   }
 
  
   template<RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
-  void fpmul(fast_float<M,E> a, fast_float<M,E> &output, bool &invalid) {
+  void fpmul(fast_float<M,E> a, fast_float<M,E> &output) {
 
     // Create significants of mul.
 	
@@ -877,7 +888,6 @@ public:
     
     ac_int<mul_W,false> mul_prod_normalizer = mul_prod.template slc<mul_W>(0);
 
-    //TODO: MUL NEEDS LEADING ZEROS?????
 
     // Normalization.
     
@@ -925,11 +935,24 @@ public:
     // Injection Rounding.
     
     static const int mul_inj_point = M + 1;
-    // ac_int<1,false> mul_round = mul_prod_normalizer[mul_inj_point-1] & ((mul_prod_normalizer[mul_inj_point]) 
-    //               | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
-    
-    ac_int<1,false> mul_round = mul_prod_normalizer[mul_inj_point-1] & ((mul_prod_normalizer[mul_inj_point]) 
-                  | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+
+    ac_int<1,false> mul_round;
+    switch (RND_MODE) {
+      
+      case EVEN:
+        // Round to nearest tie to even.
+          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+          break;
+      case ODD:
+          // Round to nearest tie to odd.
+          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | !(mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+          break;
+      case INF:
+          // Round infinity.
+          mul_round = mul_prod_normalizer[mul_inj_point-1];
+          break;
+
+      }
                   
     ac_int<M+2,false> mul_signif_result = mul_prod_normalizer.template slc<M+1>(mul_inj_point) + mul_round;
     
@@ -970,45 +993,44 @@ public:
 
 
   }
-
-  template<int N>
+  
+  // TODO : Support for denormals
+  template<int N, bool DENORMALS=false>
   void dotProd(fast_float<M,E> A[N], fast_float<M,E> B[N]) {
 
      bool AisInf[N], BisInf[N], AisZero[N], BisZero[N];
+     bool mulisInf[N];
+
+     sgn_t infSign;
      sgn_t mulSign[N];
+
+    ac_int<M+1,false> fracA[N], fracB[N];
     
     #pragma hls_unroll
     INP_DEC: for (int i=0; i< N; i++){
+      // Check for infinite values
       AisInf[i] = A[i].exponent.and_reduce();
       BisInf[i] = B[i].exponent.and_reduce();
-
+      
+      // Check for zero values (DENORMALS==0)
       AisZero[i] = A[i].exponent == 0;
       BisZero[i] = B[i].exponent == 0;
 
       mulSign[i] = A[i].sign ^ B[i].sign;
-    }
-    
-    ac_int<1,false> infSign;
-    bool mulisInf[N];
-    #pragma hls_unroll
-    M_INFcheck: for (int i=0; i< N; i++) {
-      mulisInf[i] = AisInf[i] | BisInf[i];
-      infSign =mulSign[i];
-    }
 
-    ac_int<M+1,false> fracA[N], fracB[N];
-    #pragma hls_unroll
-    GET_FRAC: for (int i=0; i<N; i++) {
+      mulisInf[i] = AisInf[i] | BisInf[i];
+      infSign =mulSign[i]; // TODO : check sign for infinity
+
       fracA[i]    = A[i].mantissa;
       fracA[i][M] = 1;
 
       fracB[i]    = B[i].mantissa;
       fracB[i][M] = 1;
     }
-
+    
     // Calculate exponent result 
-    static const ac_int<E,false> mul_exp_base = (1 << (E-1)) - 1;
-    static const ac_int<E,false> mul_exp_base_min_1 = (1 << (E-1)) - 2;
+    static const ac_int<E,false> mul_exp_base = e_bias;
+    static const ac_int<E,false> mul_exp_base_min_1 = e_bias-1;
 
     static const int mul_input_W = M + 1;
     static const int mul_W = (mul_input_W) << 1;
@@ -1042,19 +1064,13 @@ public:
 
       mul_exp_result[i] = (mul_overf[i]) ? mul_exp_overf[i] : mul_exp[i];
 
-      if (mul_exp_result[i] > 255 ) {
-        mul_exp_result[i] = 255;
+      if (mul_exp_result[i] >= ((1<<E)-1)) {
+        mul_exp_result[i] = ((1<<E)-1);
         mulisInf[i] = true;
       }
       if (mul_exp_result[i]<0) {
         mul_exp_result[i] = 0;
       }
-      
-      // bool mul_zero;
-      // const int mul_prod_lz_cnt = (mul_prod[i]).leading_sign(mul_zero);
-      // if (mul_zero) 
-      //   mul_exp_result[i] = 0;  
-
     }
 
     // Start the addition
@@ -1137,39 +1153,24 @@ public:
   // OVERLOAD OPERATORS
 
   void operator = (const float &inFP) {
-    
-    unsigned int* ptr = (unsigned int*)&inFP;
-    
+
+    ac_int<32,false> in = ((ac_ieee_float<binary32>)inFP).data_ac_int();
+
     // find sign
-    int s = *ptr >> 31;
-    sign = (sgn_t)s;
+    sign = in[31];
     
     // find exponent
-    int e = *ptr & 0x7f800000;
-    e >>= 23;
-    e -= 127;
-    e += e_bias;
+    ac_int<9,true> e = in.template slc<8>(23);
+    if (e > 0) {
+      e -= 127;
+      e += e_bias;
+    }
     exponent = (e>(1<<E)-1) ? (exp_t)((1<<E)-1) : (e<0) ? (exp_t)0 : (exp_t)e;
 
     // find mantissa
-    int m = *ptr & 0x007fffff;
-    mantissa = ((e>(1<<E)-1) || e<=0) ? (man_t)0 : ((M>23) ? (man_t)((long)m<<(M-23)) : (man_t)(m>>(23-M)));
-  
-
+    ac_int<23,false> m = in.template slc<23>(0);
+    mantissa = (e>(1<<E)-1) ? (man_t)0 : ((M>23) ? (man_t)((ac_int<M,false>)m<<(M-23)) : (man_t)(m.template slc<M>(23-M)));
   }
-
-  /*void operator = (const double &inFP) {
-    unsigned long* ptr = (unsigned long*)&inFP;
-
-    int s = *ptr >> 63;
-    int e = (*ptr & 0x7ff0000000000000)>>52;
-    long m = *ptr & 0xfffffffffffff;
-
-    sign = (sgn_t)s;
-    exponent = (e>(1<<E)-1) ? (exp_t)((1<<E)-1) : (exp_t)e;
-    mantissa = (man_t)(m>>(52-M));
-    
-  }*/
 
   void operator = (const fast_float<M,E> &in) {
     mantissa = in.mantissa;
@@ -1182,21 +1183,18 @@ public:
     fpa_dual(b,r);
     return r;
   }
-
+  
   fast_float<M, E> operator - (const fast_float<M, E> &b) {
     fast_float<M, E> r, tmp;
     tmp = b;
     tmp.sign = ~tmp.sign;
-
-    bool x;
-    fpa_dual(tmp,r,x);
+    fpa_dual(tmp,r);
     return r;
   }
   
   fast_float<M, E> operator * (const fast_float<M, E> &b) {
       fast_float<M, E> r;
-      bool x;
-      fpmul(b,r,x);
+      fpmul(b,r);
       return r;
   }
 
@@ -1224,19 +1222,31 @@ public:
   }
 
   bool operator >  (const fast_float<M,E> b) {
-    return (sign < b.sign || (sign==b.sign && (exponent>b.exponent || (exponent==b.exponent && mantissa>b.mantissa))));
+    bool greaterA = (exponent>b.exponent || (exponent==b.exponent && mantissa>b.mantissa));
+    bool greaterB = (exponent<b.exponent || (exponent==b.exponent && mantissa<b.mantissa));
+    bool greater  = (sign == 0) ? greaterA : greaterB;
+    return (sign < b.sign || (sign==b.sign && greater));
   }
 
   bool operator <  (const fast_float<M,E> b) {
-    return (sign > b.sign || (sign==b.sign && (exponent<b.exponent || (exponent==b.exponent && mantissa<b.mantissa))));
+    bool lessA = (exponent<b.exponent || (exponent==b.exponent && mantissa<b.mantissa));
+    bool lessB = (exponent>b.exponent || (exponent==b.exponent && mantissa>b.mantissa));
+    bool less  = (sign == 0) ? lessA : lessB;
+    return (sign > b.sign || (sign==b.sign && less));
   }
 
   bool operator >= (const fast_float<M,E> b) {
-    return (sign <= b.sign && exponent>=b.exponent && mantissa>=b.mantissa);
+    bool grOReqA = exponent>b.exponent || (exponent==b.exponent && mantissa>=b.mantissa);
+    bool grOReqB = exponent<b.exponent || (exponent==b.exponent && mantissa<=b.mantissa);
+    bool grOReq  = (sign==0) ? grOReqA : grOReqB;
+    return (sign<b.sign || (sign==b.sign && grOReq));
   }
 
   bool operator <= (const fast_float<M,E> b) {
-    return (sign >= b.sign && exponent<=b.exponent && mantissa<=b.mantissa);
+    bool lsOReqA = exponent<b.exponent || (exponent==b.exponent && mantissa<=b.mantissa);
+    bool lsOReqB = exponent>b.exponent || (exponent==b.exponent && mantissa>=b.mantissa);
+    bool lsOReq  = (sign==0) ? lsOReqA : lsOReqB;
+    return (sign>b.sign || (sign==b.sign && lsOReq));
   }
 
 };
