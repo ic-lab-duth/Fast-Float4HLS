@@ -3,16 +3,19 @@
 // 
 // Example using Fast-Float4HLS to build an FIR filter
 #include <iostream>
+#include <random>
 #include "fast_float.h"
 #include "mc_scverify.h"
 
+typedef ffp32 T;
+
 // Implementation of an FIR filter using the fast-float library
 #pragma hls_design
-template<int N, typename T = ffp32>
+#pragma hls_pipeline_init_interval 1
+template<int N>
 void CCS_BLOCK(fir)(T inp, T coeff[N], T &out) {
     
-    static T x[N];
-    T sum;
+    static T x[N], sum;
 
     #pragma hls_unroll
     for (int i=N-1; i>0; i--) {
@@ -20,7 +23,7 @@ void CCS_BLOCK(fir)(T inp, T coeff[N], T &out) {
     }
     x[0] = inp;
 
-    sum = 0;
+    sum = 0.0;
     #pragma hls_unroll
     for (int i=0; i<N; i++) {
         x[i].fpma_dual(coeff[i],sum,sum);
@@ -47,31 +50,32 @@ void refFir(float inp, float coeff[N], float &out) {
     out = sum;
 };
 
-CCS_MAIN(int, char **) {
-    
-    typedef ffp32 DATA_T; 
-     
+float random_float() {
+  float HI = rand();
+  float LO = -rand();
+  return LO + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI-LO)));
+};
+
+CCS_MAIN(int argc, char * argv[]) {
+        
     const int TAPS = 5;
     const int ITER = 10;
 
     float refIn, refCoeff[TAPS], refOut;
-    DATA_T In, Coeff[TAPS], Out;
+    T In, Coeff[TAPS], Out;
     
-    float HI = 65415456364.0;
-    float LO = -654364.0;
-
     srand(time(NULL));
 
     for (int i=0; i<TAPS; i++) {
-      refCoeff[i] = LO + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI-LO))); 
+      refCoeff[i] = random_float(); 
       Coeff[i] = refCoeff[i];
     }
 
     for (int i=0; i<ITER; i++) {
-      refIn =  LO + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI-LO)));
+      refIn =  random_float();
       In = refIn;
 
-      fir<TAPS,DATA_T>(In,Coeff,Out);
+      fir<TAPS>(In,Coeff,Out);
       refFir<TAPS>(refIn,refCoeff,refOut);
 
       std::cout << "OUT: " << Out.to_float() << std::endl;

@@ -3,6 +3,7 @@
 // 
 // Example using Fast-Float4HLS to build an 2D Convolution
 #include <iostream>
+#include <random>
 #include "fast_float.h"
 #include "ac_channel.h"
 
@@ -15,18 +16,20 @@ typedef ac_channel<T> chT;
 template<int IF_HEIGHT,int IF_WIDTH, int KERNEL>
 void CCS_BLOCK(conv2D) (chT &inp, T filter[KERNEL][KERNEL], chT &out) {
   
-  static T lb[KERNEL-1][IF_WIDTH+KERNEL-1];
+  static T lb[KERNEL-1][IF_WIDTH];
   static T window[KERNEL][KERNEL];
 
-  
+  #pragma hls_pipeline_init_interval 1
   for (int i=0; i<IF_HEIGHT; i++) {
     for (int j=0; j<IF_WIDTH; j++) {
 
       T cur_pxl = inp.read();
       
-      // Window and LB update
+      // Window and Line buffers update
+      #pragma hls_unroll
       for (int m=0; m<KERNEL; m++) {
         T tmp = (m < KERNEL-1) ? lb[m][j] : cur_pxl;
+        #pragma hls_unroll
         for (int n=0; n<KERNEL; n++) {
           window[m][n] = (n<KERNEL-1) ? window[m][n+1] : tmp;
         }
@@ -36,7 +39,8 @@ void CCS_BLOCK(conv2D) (chT &inp, T filter[KERNEL][KERNEL], chT &out) {
       
       // Output Pixel Calculation
       if (i>=KERNEL-1 && j>=KERNEL-1) {
-        T o_pxl = 0;
+        T o_pxl = 0.0;
+        #pragma hls_unroll
         for (int m=0; m<KERNEL; m++) {
           T tmp_pxl;
           tmp_pxl.dotProd<KERNEL>(window[m], filter[m]);
@@ -61,22 +65,22 @@ CCS_MAIN(int, char**) {
   chT img, out;
   T flt[K][K];
 
-  float HI;// = 65415456364.0;
-  float LO;// = -654364.0;
+  float HI;
+  float LO;
 
   srand(time(NULL));
 
   for (int i=0; i<H; i++)
     for (int j=0; j<W; j++) {
-      HI = 1.0;
-      LO = 0.0;
+      HI = rand();
+      LO = -rand();
       img.write(rand_num(HI,LO));
     }
 
   for (int i=0; i<K; i++)
     for (int j=0; j<K; j++) {
-      HI = 2.0;
-      LO = -2.0;
+      HI = rand();
+      LO = -rand();
       flt[i][j] = rand_num(HI,LO);
     }
 
