@@ -33,6 +33,7 @@ solution options set /Input/CppStandard c++11
 solution options set /Input/CompilerFlags { -DHLS_CATAPULT=1 }
 solution options set /Input/SearchPath { ../ }
 solution options set /Flows/QuestaSIM/SCCOM_OPTS {-O3 -x c++ -Wall -Wno-unused-label -Wno-unknown-pragmas}
+solution options set /Flows/SCVerify/USE_CCS_BLOCK true
 flow package require /SCVerify
 flow package require /QuestaSIM
 solution file add $FPATH -type C++
