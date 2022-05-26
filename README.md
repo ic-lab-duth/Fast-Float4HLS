@@ -31,7 +31,6 @@ Currently the overloaded operators +, -, *, +=, -=, *= compute the corresponding
 # Pending Features
 
 * Allow for possible increase the output precision of dot product.
-* support arbitrary rounding rules on dot product function
 * Implement Division
 
 # Contributors

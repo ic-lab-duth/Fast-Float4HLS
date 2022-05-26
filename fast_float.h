@@ -92,6 +92,16 @@ public:
   fast_float(const float &in) {
     this->operator=(in);
   };
+
+  void set(sgn_t s, exp_t e, man_t m) {
+    sign = s;
+    exponent = e;
+    mantissa = m;
+  }
+
+  void setNan()    { this->set(0, (1<<E)-1, 1); }
+  void setPosINF() { this->set(0, (1<<E)-1, 0); }
+  void setNegINF() { this->set(1, (1<<E)-1, 0); }
   
   /*
   * .to_float() is a non-synthesizable function that
@@ -941,7 +951,7 @@ public:
       
       case EVEN:
         // Round to nearest tie to even.
-          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point+1] | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
           break;
       case ODD:
           // Round to nearest tie to odd.
@@ -995,7 +1005,7 @@ public:
   }
   
   // TODO : Support for denormals
-  template<int N, bool DENORMALS=false>
+  template<int N, RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
   void dotProd(fast_float<M,E> A[N], fast_float<M,E> B[N]) {
 
      bool AisInf[N], BisInf[N], AisZero[N], BisZero[N];
@@ -1141,10 +1151,37 @@ public:
     res <<= lead_zer;
     mul_exp_result[0] -= (lead_zer);
     mul_exp_result[0] += (lead_zer==0) ? N-1 : N;
-   
+    
+    // res width = 2M+2+N, we need to keep 1+M bits, so we start 
+    //  from the M+N+2-1 index and keep M+1 
+    static const int ind = M+N+1;
+    ac_int<M+2,false> rounded_res = res.template slc<M+1>(ind);
+    
+    ac_int<1,false> mul_round;
+    switch (RND_MODE) {
+      
+      case EVEN:
+        // Round to nearest tie to even.
+          mul_round = res[ind-1] & (res[ind] | (res.template slc<ind-1>(0)).or_reduce());
+          break;
+      case ODD:
+          // Round to nearest tie to odd.
+          mul_round = res[ind-1] & (res[ind] | !(res.template slc<ind-1>(0)).or_reduce());
+          break;
+      case INF:
+          // Round infinity.
+          mul_round = res[ind-1];
+          break;
 
-    mantissa = (addisInf) ? (ac_int<M, false>)(0) : res.template slc<M>(M+N+1); 
-    exponent = (addisInf) ? (ac_int<E, false>)((1<<E) -1) : (ac_int<E, false>)(mul_exp_result[0].template slc<E>(0));
+      }
+                  
+    rounded_res += mul_round;
+    
+    exp_t tmp_exp = mul_exp_result[0].template slc<E>(0);
+    exp_t over_exp = (tmp_exp == (1<<E)-1) ? tmp_exp : (exp_t)(tmp_exp+1);
+
+    mantissa = (addisInf) ? (ac_int<M, false>)(0) : (rounded_res[M+1]) ? rounded_res.template slc<M>(1) : rounded_res.template slc<M>(0); 
+    exponent = (addisInf) ? (ac_int<E, false>)((1<<E) -1) : (rounded_res[M+1]) ?  over_exp : tmp_exp;
     sign = (addisInf) ? infSign : res_sign;
         
   }
