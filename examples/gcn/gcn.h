@@ -60,7 +60,6 @@ private:
       static T out_buf1[O_F1];
 
       A_ROW: for (int i=0; i < N; i++) {
-        if ( i < 100 ) {
 
         // initialize output buffer
         for (int j=0; j < O_F1; j++) {
@@ -84,7 +83,7 @@ private:
         }
 
         cur_row = next_row;
-        }
+        
       }
 
       // second GCN layer
@@ -95,7 +94,6 @@ private:
 
       A_ROW_2: for (int i=0; i < N; i++) {
         
-        if ( i < 100 ) {
         // initialize output buffer
         for (int j=0; j < O_F1; j++) {
           out_buf2[j] = 0.0;
@@ -118,7 +116,6 @@ private:
         }
 
         cur_row = next_row;
-        }
       }
 
     }
