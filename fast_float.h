@@ -10,6 +10,8 @@
 #include <ac_fixed.h>
 #include <ac_std_float.h>
 
+#include "max_search.h"
+
 template<int M, int E>
 class fast_float {
 public:
@@ -109,53 +111,24 @@ public:
   */
   float to_float() {
     
-    ac_int<width,false> data;
+    ac_int<32,false> data;
     for (int i=0; i<M; i++)
-      data[i] = mantissa[i];
-    
-    for (int i=0; i<E; i++)
-      data[M+i] = exponent[i];
+      data[22-i] = mantissa[M-1-i];
 
-    data[M+E] = sign;
+    for (int i=M; i<23; i++)
+      data[22-i] = 0;
+    
+    ac_int<8,false> tmpExp = exponent - e_bias + 127;
+    for (int i=0; i<8; i++)
+      data[23+i] = (exponent == (1<<E)+-1) ? 1 : tmpExp[i];
+
+    data[31] = sign;
     
     
-    ac_std_float<width,E> ieee_data;
+    ac_std_float<32,8> ieee_data;
     ieee_data.set_data(data);
     return ieee_data.to_float();
-    
-    /*
-    // create significand
-    ac_fixed<M+1,2,false> fix;
-    //fix[M+1] = 0;
-    fix[M] = ((mantissa== 0) && (exponent==0)) ? 0 : 1;
-    for (int i=0; i<M; i++)
-      fix[i] = mantissa[i];
-    
-    for (int i=0; i<M; i++)
-      std::cout << mantissa[M-1-i];
-    std::cout << std::endl;
-    // create 2^exp
-    float exp= (exponent < e_bias) ? 0.5 : 2;
-    int iter = (exponent < e_bias) ? e_bias - exponent : exponent - e_bias;
-    float e = 1;
-    for (int i=0; i< iter; i++) 
-      e *= exp;
-
-    // define sign  
-    float sg = (sign == 0) ? (float)1.0 : (float)-1.0;
-    
-    // compute float number
-    float fo = sg*((float)fix.to_double())*e;
-
-    if (exponent==((e_bias<<1)+1)) {
-      if (mantissa ==0) {
-        return (sign == 0) ? INFINITY : -INFINITY;
-      } else {
-        return NAN;
-      }
-    } else {
-      return fo;
-    }*/
+   
   }
 
   /** FLOATING POINT OPERATIONS **/
@@ -951,11 +924,11 @@ public:
       
       case EVEN:
         // Round to nearest tie to even.
-          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point+1] | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | mul_prod_normalizer[mul_inj_point-2] | (mul_prod_normalizer.template slc<mul_inj_point-2>(0)).or_reduce());
           break;
       case ODD:
           // Round to nearest tie to odd.
-          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | !(mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | !mul_prod_normalizer[mul_inj_point-2] | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
           break;
       case INF:
           // Round infinity.
@@ -1007,14 +980,24 @@ public:
   // TODO : Support for denormals
   template<int N, RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
   void dotProd(fast_float<M,E> A[N], fast_float<M,E> B[N]) {
+    
+    static const ac_int<E,false> mul_exp_base = e_bias;
+    static const ac_int<E,false> mul_exp_base_min_1 = e_bias-1;
+    static const int mul_input_W = M + 1;
+    static const int mul_W = (mul_input_W) << 1;
 
-     bool AisInf[N], BisInf[N], AisZero[N], BisZero[N];
-     bool mulisInf[N];
-
-     sgn_t infSign;
-     sgn_t mulSign[N];
+    bool AisInf[N], BisInf[N], AisZero[N], BisZero[N];
+    
+    sgn_t infSign;
+    sgn_t mulSign[N];
 
     ac_int<M+1,false> fracA[N], fracB[N];
+
+    
+    ac_int<N,false> mulisInf;
+    ac_int<E+2,true> mul_exp_overf[N]; 
+    ac_int<E+2,true> mul_exp[N];
+    ac_int<E+2,true> mul_exp_result[N];
     
     #pragma hls_unroll
     INP_DEC: for (int i=0; i< N; i++){
@@ -1036,121 +1019,93 @@ public:
 
       fracB[i]    = B[i].mantissa;
       fracB[i][M] = 1;
-    }
     
-    // Calculate exponent result 
-    static const ac_int<E,false> mul_exp_base = e_bias;
-    static const ac_int<E,false> mul_exp_base_min_1 = e_bias-1;
+      // Calculate exponent result 
 
-    static const int mul_input_W = M + 1;
-    static const int mul_W = (mul_input_W) << 1;
-     
-    
-    ac_int<E+2,true> mul_exp_overf[N]; 
-    ac_int<E+2,true> mul_exp[N];
-    #pragma hls_unroll
-    M_EXPcalc: for (int i=0; i<N; i++) {
-      mul_exp_overf[i] = A[i].exponent + B[i].exponent - mul_exp_base_min_1;
-      mul_exp[i] = A[i].exponent + B[i].exponent - mul_exp_base;
+      
+      mul_exp[i] = (AisZero[i] || BisZero[i]) ? (ac_int<E+2,true> )0 :  A[i].exponent + B[i].exponent - mul_exp_base;
+      if (mul_exp[i]<0) 
+        mul_exp[i] = 0;
+      else if (mul_exp[i] >= ((1<<E)-1)) 
+        mul_exp[i] = ((1<<E)-1);
+      
+      mul_exp_overf[i] = (AisZero[i] || BisZero[i]) ? (ac_int<E+2,true> )0 : A[i].exponent + B[i].exponent - mul_exp_base_min_1;
+      if (mul_exp_overf[i]<0) 
+        mul_exp_overf[i] = 0;
+      else if (mul_exp_overf[i] >= ((1<<E)-1)) 
+        mul_exp_overf[i] = ((1<<E)-1);
     }
+    
     
     // Do the multiplication.
-    ac_int<1,false> mul_overf[N];
-    ac_int<E+2,true> mul_exp_result[N];
-
     ac_int<mul_W,false> mul_prod[N];
+    ac_int<1,false> mul_overf[N];
+
     #pragma hls_unroll
     DO_MUL: for (int i=0; i<N; i++) {
-      multiply(fracA[i], fracB[i], mul_prod[i]);
+      
+      //multiply(fracA[i], fracB[i], mul_prod[i]);
+      mul_prod[i] = fracA[i]*fracB[i];
 
-      if (AisZero[i] || BisZero[i])  {
+      if (AisZero[i] || BisZero[i]) {
         mul_prod[i] = 0;
-        mul_exp_result[i] = 0;
-      }
-          
-
-      mul_overf[i] = mul_prod[i][mul_W-1];
-      mul_prod[i] <<= !mul_overf[i];
-
-      mul_exp_result[i] = (mul_overf[i]) ? mul_exp_overf[i] : mul_exp[i];
-
-      if (mul_exp_result[i] >= ((1<<E)-1)) {
-        mul_exp_result[i] = ((1<<E)-1);
-        mulisInf[i] = true;
-      }
-      if (mul_exp_result[i]<0) {
-        mul_exp_result[i] = 0;
-      }
-    }
-
-    // Start the addition
-    bool addisInf = false;
-    #pragma hls_unroll
-    A_INFcheck: for (int i=0; i<N; i++)
-      addisInf |= mulisInf[i];
-
-    
-    ac_int<E+1,true> diffE[N][N];
-    #pragma hls_unroll
-    MAXE_H: for (int i=0; i<N; i++) {
-      #pragma hls_unroll
-      MAXE_V: for (int j=0; j<N; j++) {
-        diffE[i][j] = (mul_exp_result[i]) - (mul_exp_result[j]);
-      }
-    }
-    
-    bool maxExp_OH[N];
-    #pragma hls_unroll
-    MAX_E: for (int i=0; i<N; i++) {
-      maxExp_OH[i] = true;
-      #pragma hls_unroll
-      AND_MSB: for (int j=0; j<N; j++) {
-        maxExp_OH[i] &= ~diffE[i][j][E];
-      }
-    }
-
-    bool only1 = true;
-    #pragma hls_unroll
-    A_ALLIGN: for (int i=0; i<N; i++) {
-      #pragma hls_unroll
-      for (int j=0; j<N; j++){     
-        if (maxExp_OH[i] && only1) { 
-          mul_prod[j] >>= diffE[i][j];
-          mul_exp_result[j] +=diffE[i][j];
-          if (j==N-1) 
-            only1 = false;
-        }
-      }
-    }
-    
-    ac_int<mul_W+1,true> add_op[N];
-    #pragma hls_unroll
-    TWOs_COMPL: for (int i=0; i<N; i++) {
-      if (mulSign[i]) {
-        add_op[i] = -mul_prod[i];
+        mul_overf[i] =0; 
       } else {
-        add_op[i] = mul_prod[i];
+        mul_overf[i] = mul_prod[i][mul_W-1];
+        mul_prod[i] <<= !mul_overf[i];
       }
         
-    }
+      mul_exp_result[i] = (mul_overf[i]) ? mul_exp_overf[i] : mul_exp[i];
+      
+      if (mul_exp_result[i] >= ((1<<E)-1)) {
+        mulisInf[i] = 1;
+      }
+    } // DO_MUL
 
-    ac_int<mul_W+1+N,true> res1=0;
+
+    // Start the addition
+
+    ac_int<1,false> addisInf = mulisInf.or_reduce();  // check infinity
+
+    ac_int<E+2,true> maxExp = max<N>(mul_exp_result); // find max exponent
+    
+    ac_int<E+2,true> shifted_exp_res[N];
+    ac_int<mul_W,false> shifted_prod[N];
+    ac_int<E+1,true> diffE[N];
     #pragma hls_unroll
-    MANT_ADD: for (int i=0; i<N; i++) {
-      res1 += add_op[i];
+    ALLIGN: for (int i=0; i<N; i++) {
+      diffE[i] = maxExp-mul_exp_result[i];
+      shifted_prod[i] = mul_prod[i] >> diffE[i];
+      shifted_exp_res[i] = mul_exp_result[i] + diffE[i];
+    }
+        
+    ac_int<mul_W+1,true> add_op[N];
+    ac_int<mul_W+1+N,true> acc=0;
+
+    #pragma hls_unroll
+    TWOs_COMPL_ADD: for (int i=0; i<N; i++) {
+      if (mulSign[i]) {
+        add_op[i] = -shifted_prod[i];
+      } else {
+        add_op[i] = shifted_prod[i];
+      }   
+      acc += add_op[i];
     }
 
-    ac_int<1,false> res_sign = res1[mul_W+N];
-
+    
+    ac_int<1,false> res_sign = acc[mul_W+N];
+    
+    ac_int<mul_W+1+N,false> res1 = acc;
+    ac_int<mul_W+1+N,false> res2 = acc.bit_complement();
+    
     ac_int<mul_W+N,false> res;
-    res = (res_sign) ? (-res1).template slc<mul_W+N>(0) : res1.template slc<mul_W+N>(0);
-
+    res = (res_sign) ? res2.template slc<mul_W+N>(0) : res1.template slc<mul_W+N>(0);
     
     const int lead_zer = res.leading_sign();
 
     res <<= lead_zer;
-    mul_exp_result[0] -= (lead_zer);
-    mul_exp_result[0] += (lead_zer==0) ? N-1 : N;
+    maxExp -= (lead_zer);
+    maxExp += (lead_zer==0) ? N-1 : N;
     
     // res width = 2M+2+N, we need to keep 1+M bits, so we start 
     //  from the M+N+2-1 index and keep M+1 
@@ -1162,28 +1117,27 @@ public:
       
       case EVEN:
         // Round to nearest tie to even.
-          mul_round = res[ind-1] & (res[ind] | (res.template slc<ind-1>(0)).or_reduce());
+          mul_round = res[ind-1] & ((res[ind] | res[ind-2] | (res.template slc<ind-2>(0)).or_reduce()));
           break;
       case ODD:
           // Round to nearest tie to odd.
-          mul_round = res[ind-1] & (res[ind] | !(res.template slc<ind-1>(0)).or_reduce());
+          mul_round = res[ind-1] & ((res[ind] | res[ind-2] | ~(res.template slc<ind-2>(0)).or_reduce()));
           break;
       case INF:
           // Round infinity.
           mul_round = res[ind-1];
           break;
 
-      }
-                  
-    rounded_res += mul_round;
-    
-    exp_t tmp_exp = mul_exp_result[0].template slc<E>(0);
+      }                  
+    rounded_res += (mul_round+res_sign);
+
+    exp_t tmp_exp = maxExp.template slc<E>(0);
     exp_t over_exp = (tmp_exp == (1<<E)-1) ? tmp_exp : (exp_t)(tmp_exp+1);
 
-    mantissa = (addisInf) ? (ac_int<M, false>)(0) : (rounded_res[M+1]) ? rounded_res.template slc<M>(1) : rounded_res.template slc<M>(0); 
-    exponent = (addisInf) ? (ac_int<E, false>)((1<<E) -1) : (rounded_res[M+1]) ?  over_exp : tmp_exp;
+    mantissa = (addisInf) ? (man_t)(0) : (rounded_res[M+1]) ? rounded_res.template slc<M>(1) : rounded_res.template slc<M>(0); 
+    exponent = (addisInf) ? (exp_t)((1<<E) -1) : (rounded_res[M+1]) ?  over_exp : tmp_exp;
     sign = (addisInf) ? infSign : res_sign;
-        
+
   }
 
   
