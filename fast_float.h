@@ -10,8 +10,6 @@
 #include <ac_fixed.h>
 #include <ac_std_float.h>
 
-#include "max_search.h"
-
 template<int M, int E>
 class fast_float {
 public:
@@ -23,7 +21,6 @@ public:
   exp_t exponent;
   sgn_t sign;
    
-
   static const int width = M + E + 1;
   static const int man_width = M;
   static const int exp_width = E;
@@ -33,6 +30,31 @@ public:
   enum RND_ENUM {EVEN, ODD, INF};
 
 private:
+   
+  template<int N>
+  struct max_s {
+    template<typename T>
+    static T max(T *a) {
+      T m0 = max_s<N/2>::max(a);
+      T m1 = max_s<N-N/2>::max(a+N/2);
+
+      return m0 > m1 ? m0 : m1;
+    }
+  };
+
+  template<> 
+  struct max_s<1> {
+    template<typename T>
+    static T max(T *a) {
+      return a[0];
+    }
+  };
+
+  template<int N, typename T>
+  T max(T *a) {
+    return max_s<N>::max(a);
+  };
+  
   template<int N=M, bool S=false>
   void full_adder(ac_int<2*(M+1),false> a,
                   ac_int<2*(M+1),false> b,
