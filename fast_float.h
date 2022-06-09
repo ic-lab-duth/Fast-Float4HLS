@@ -10,6 +10,30 @@
 #include <ac_fixed.h>
 #include <ac_std_float.h>
 
+template<int N>
+struct max_s {
+  template<typename T>
+  static T max(T *a) {
+    T m0 = max_s<N/2>::max(a);
+    T m1 = max_s<N-N/2>::max(a+N/2);
+
+    return m0 > m1 ? m0 : m1;
+  }
+};
+
+template<> 
+struct max_s<1> {
+  template<typename T>
+  static T max(T *a) {
+    return a[0];
+  }
+};
+
+template<int N, typename T>
+T max(T *a) {
+  return max_s<N>::max(a);
+};
+
 template<int M, int E>
 class fast_float {
 public:
@@ -29,32 +53,7 @@ public:
 
   enum RND_ENUM {EVEN, ODD, INF};
 
-private:
-   
-  template<int N>
-  struct max_s {
-    template<typename T>
-    static T max(T *a) {
-      T m0 = max_s<N/2>::max(a);
-      T m1 = max_s<N-N/2>::max(a+N/2);
-
-      return m0 > m1 ? m0 : m1;
-    }
-  };
-
-  template<> 
-  struct max_s<1> {
-    template<typename T>
-    static T max(T *a) {
-      return a[0];
-    }
-  };
-
-  template<int N, typename T>
-  T max(T *a) {
-    return max_s<N>::max(a);
-  };
-  
+private: 
   template<int N=M, bool S=false>
   void full_adder(ac_int<2*(M+1),false> a,
                   ac_int<2*(M+1),false> b,
@@ -838,8 +837,16 @@ public:
   template<RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
   void fpmul(fast_float<M,E> a, fast_float<M,E> &output) {
 
+    static const ac_int<E,false> mul_exp_base = (1 << (E-1)) - 1;
+    static const int signif_W = M + 1;
+    static const int mul_W = (signif_W) << 1;
+
+    ac_int<1,false> a_is_zero, c_is_zero;
+
+    // Sign Calculation
+    const ac_int<1,false> sign_res = sign ^ a.sign;
+
     // Create significants of mul.
-	
     ac_int<M+1,false> mul_signif_a = mantissa;
     ac_int<M+1,false> mul_signif_c = a.mantissa;
     
@@ -852,6 +859,9 @@ public:
     if (DENORMALS) {
       mul_signif_a <<= is_a_subnormal;
       mul_signif_c <<= is_c_subnormal;
+
+      a_is_zero = ~(mul_signif_a.or_reduce());
+      c_is_zero = ~(mul_signif_c.or_reduce());
     }
     
     // Infinity Check.
@@ -859,144 +869,114 @@ public:
     bool Is_inf = ((exponent).and_reduce() | (a.exponent).and_reduce());
     
     // Calculate exponent result and overf exponent result.
-    
-    static const ac_int<E,false> mul_exp_base = (1 << (E-1)) - 1;
-    ac_int<E+2,true> mul_pos_exp_result = exponent + a.exponent - mul_exp_base;
-    const ac_int<E+2,true> mul_neg_exp_sft_num = mul_exp_base - exponent - a.exponent;
-    
-    // Do the multiplication.
-    
-    static const int signif_W = M + 1;
-    static const int mul_W = (signif_W) << 1;
-    
-    ac_int<mul_W,false> mul_res;
-    multiply(mul_signif_a,mul_signif_c,mul_res);
-
-    ac_int<mul_W+1,false> mul_prod = (DENORMALS) ? mul_res : ((is_a_subnormal || is_c_subnormal) ? (ac_int<mul_W,false>)0 : mul_res);
-
-    mul_prod <<= 1;
-    
-    // Overflow Check.
-    
-    bool mul_overflow = false;
-    
-    if (mul_prod[mul_W]) {
-      mul_prod >>= 1;
-      mul_overflow = true;
-    }
-    
-    // Create mul_prod_normalizer witch has M more LSBs 
-    // to keep shifted out sticky bits in case of subnormal result.
-    
-    // ac_int<mul_W+M+2,false> mul_prod_normalizer = mul_prod.template slc<mul_W>(0);
-    // mul_prod_normalizer <<= M+2;
-    
-    ac_int<mul_W,false> mul_prod_normalizer = mul_prod.template slc<mul_W>(0);
-
-
-    // Normalization.
-    
-    bool mul_zero = false;
-    const bool pos_exp = (mul_pos_exp_result >= 0);
-    // const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = (mul_prod_normalizer.template slc<mul_W>(M+2)).leading_sign(mul_zero);
-    const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mul_prod_normalizer.leading_sign(mul_zero);
-    
-    if (mul_zero) {
-      
-      mul_pos_exp_result = 0;
-    
-    } else if (!pos_exp) {
-
-      mul_pos_exp_result = 0;
-      mul_prod_normalizer >>= mul_neg_exp_sft_num;
-      
-    } else {
-
-      if (mul_lzc >= mul_pos_exp_result) {
-        
-        mul_prod_normalizer <<= mul_pos_exp_result;
-        mul_pos_exp_result = 0;
-          
-      } else {
-        
-        mul_prod_normalizer <<= mul_lzc;
-        mul_pos_exp_result -= mul_lzc;
-        
-      }
-    }
-    
-    // Subnormal Result Check.
-    
-    mul_prod_normalizer >>= ((mul_pos_exp_result == 0) && (!mul_overflow));
+    ac_int<E+2,true> mul_exp =  (DENORMALS) ? 
+                                ((a_is_zero | c_is_zero) ? (ac_int<E+2,true>)0 : (ac_int<E+2,true>)(exponent + a.exponent - mul_exp_base)) :
+                                ((is_a_subnormal | is_c_subnormal)) ? (ac_int<E+2,true>)0 : (ac_int<E+2,true>)(exponent + a.exponent - mul_exp_base);
+    if (mul_exp < 0) 
+       mul_exp = 0;
+    else if (mul_exp >= ((1<<E)-1)) 
+       mul_exp = ((1<<E)-1);
     
     // Overflow Exponent Calculation
+    ac_int<E+2,true> mul_exp_overf = (DENORMALS) ? 
+                                     ((a_is_zero | c_is_zero) ? (ac_int<E+2,true>)0 : (ac_int<E+2,true>)(exponent + a.exponent - mul_exp_base + 1)) :
+                                     ((is_a_subnormal | is_c_subnormal)) ? (ac_int<E+2,true>)0 : (ac_int<E+2,true>)(exponent + a.exponent - mul_exp_base + 1);
+    if (mul_exp_overf < 0) 
+       mul_exp_overf = 0;
+    else if (mul_exp_overf >= ((1<<E)-1)) 
+       mul_exp_overf = ((1<<E)-1);
+
+    ac_int<E+2,true> right_shift;
+    if (DENORMALS) {
+      right_shift = (a_is_zero | c_is_zero) ? (ac_int<E+2,true>)0 : (ac_int<E+2,true>)(mul_exp_base - exponent - a.exponent);
+      if (right_shift < 0) 
+        right_shift = 0;
+      else if (right_shift > M+2) 
+        right_shift = M+2;
+
+    }
+
+    ac_int<1,false> mul_zero = (DENORMALS) ? (a_is_zero | c_is_zero) : (is_a_subnormal | is_c_subnormal);
     
-    const ac_int<E+2,true> mul_pos_overf_exp_res = mul_pos_exp_result + 1;
+    // Do the multiplication.
+    ac_int<mul_W,false> mul_res = mul_signif_a*mul_signif_c;
+    ac_int<mul_W,false> mul_prod = (DENORMALS) ? ((a_is_zero | c_is_zero) ? (ac_int<mul_W,false>)0 : mul_res) : ((is_a_subnormal | is_c_subnormal) ? (ac_int<mul_W,false>)0 : mul_res);
     
-    // Sign Calculation
+
+    // Overflow Check.
+    ac_int<1,false> mul_overflow = mul_prod[mul_W-1];
+    ac_int<E+2,true> exp_res = (mul_overflow) ? mul_exp_overf : mul_exp;
+  
+    // Normalization.
+    if (DENORMALS) {
+      const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mul_prod.leading_sign();
+      
+      if (exp_res==0) {     
+        mul_prod >>= right_shift;     
+      } else {
+        //mul_prod <<= mul_lzc;
+        if (mul_lzc >= exp_res) {	   
+          mul_prod <<= exp_res;
+	        exp_res = 0;  
+      	} else {
+          mul_prod <<= (mul_lzc+1);
+	        exp_res -= (mul_lzc+1);	
+        }
+      }
+      
+      // Subnormal Result Check.
+      mul_prod >>= ((exp_res == 0) && (!mul_overflow));
+    }
     
-    const ac_int<1,false> sign_res = sign ^ a.sign;
+   
     
     // Injection Rounding.
+    const int inj_point = M;
     
-    static const int mul_inj_point = M + 1;
-
     ac_int<1,false> mul_round;
     switch (RND_MODE) {
       
       case EVEN:
         // Round to nearest tie to even.
-          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | mul_prod_normalizer[mul_inj_point-2] | (mul_prod_normalizer.template slc<mul_inj_point-2>(0)).or_reduce());
+          mul_round = (mul_overflow) ? mul_prod[inj_point] & (mul_prod[inj_point+1] | mul_prod[inj_point-1] | (mul_prod.template slc<inj_point-1>(0)).or_reduce()) :
+                                       mul_prod[inj_point-1] & (mul_prod[inj_point] | mul_prod[inj_point-2] | (mul_prod.template slc<inj_point-2>(0)).or_reduce());
           break;
       case ODD:
           // Round to nearest tie to odd.
-          mul_round = mul_prod_normalizer[mul_inj_point-1] & (mul_prod_normalizer[mul_inj_point] | !mul_prod_normalizer[mul_inj_point-2] | (mul_prod_normalizer.template slc<mul_inj_point-1>(0)).or_reduce());
+          mul_round = (mul_overflow) ? mul_prod[inj_point] & (mul_prod[inj_point+1] | !mul_prod[inj_point-1] | (mul_prod.template slc<inj_point-1>(0)).or_reduce()) :
+                                       mul_prod[inj_point-1] & (mul_prod[inj_point] | !mul_prod[inj_point-2] | (mul_prod.template slc<inj_point-2>(0)).or_reduce());
           break;
       case INF:
           // Round infinity.
-          mul_round = mul_prod_normalizer[mul_inj_point-1];
+          mul_round = (mul_overflow) ? mul_prod[inj_point] : mul_prod[inj_point-1];
           break;
 
       }
-                  
-    ac_int<M+2,false> mul_signif_result = mul_prod_normalizer.template slc<M+1>(mul_inj_point) + mul_round;
+
+    // TODO: check if moving addition after saves area              
+    ac_int<M+2,false> mul_rounded = (mul_overflow) ? mul_prod.template slc<M+1>(inj_point+1) + mul_round : mul_prod.template slc<M+1>(inj_point) + mul_round;
     
+
+    ac_int<1,false> extra_shift = 0;
     // Rounding Overflow Check.
+    if (DENORMALS) {
+      if ((exp_res == 1) && mul_rounded[M]) 
+        extra_shift = 1;
+    } else {
+      if (mul_rounded[M+1]) 
+        extra_shift = 1;
+    } 
     
-    if (mul_signif_result[M+1]) {
-      
-      mul_signif_result >>= 1;
-      mul_overflow = true;
-      
-    } else if ((mul_pos_exp_result == 0) && mul_signif_result[M]) {
-      
-      mul_overflow = true;
-      
-    }
-    
-    const ac_int<E+2,true> mul_exp_result = (mul_overflow && pos_exp) ? mul_pos_overf_exp_res : mul_pos_exp_result;
+    exp_t tmp_exp = exp_res.template slc<E>(0);
+    exp_t mul_exp_result = (tmp_exp == (1<<E)-1) ? tmp_exp : (exp_t)(tmp_exp+extra_shift);
     
     // Infinity Result Check.
-    
-    Is_inf = ((mul_exp_result.template slc<E>(0)).and_reduce() | mul_exp_result[E]) ? true : Is_inf;
-          
+    Is_inf = mul_exp_result.and_reduce() |  Is_inf; 
+
     // Return result.
-    
     output.sign = sign_res;
-    
-    if (Is_inf) {
-      
-      output.exponent = (1 << E) - 1;
-      output.mantissa = 0;
-      
-    } else {
-      
-      output.exponent = mul_exp_result;				
-      output.mantissa = mul_signif_result.template slc<M>(0);
-      
-    }
-
-
+    output.exponent = (Is_inf) ? (exp_t)((1 << E) - 1) : mul_exp_result;
+    output.mantissa = (Is_inf) ? (man_t)0 : mul_rounded.template slc<M>(extra_shift);
   }
   
   // TODO : Support for denormals
