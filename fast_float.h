@@ -52,63 +52,6 @@ public:
   static const int frac_bits = M + 1;
 
   enum RND_ENUM {EVEN, ODD, INF};
-
-private: 
-  template<int N=M, bool S=false>
-  void full_adder(ac_int<2*(M+1),false> a,
-                  ac_int<2*(M+1),false> b,
-                  ac_int<2*(M+1),false> c, 
-                  ac_int<2*(M+1),false> &sum_bits,
-                  ac_int<2*(M+1),false> &carry_bits) {
-    sum_bits= a^b^c;
-    carry_bits= ((a & b)|(a & c)|(b & c))<<1;
-  }
-
-  template<int N=M, bool S=false>
-  void multiply(ac_int<N,S> operand_1, ac_int<N,S> operand_2, ac_int<2*N,S> &result) {
-    
-    ac_int<N/2,false> fh_operand_1, sh_operand_1;
-    ac_int<N/2,false> fh_operand_2, sh_operand_2;
-    ac_int<N,false> p1, p2, p3, p4;
-
-    ac_int<2*N,false> partial_product_1=0;
-    ac_int<2*N,false> partial_product_2=0;
-    ac_int<2*N,false> partial_product_3=0;
-    ac_int<2*N,false> partial_product_4=0;
-    ac_int<2*N,false> sum_first=0;
-    ac_int<2*N,false> carry_first=0;
-    ac_int<2*N,false> sum=0;
-    ac_int<2*N,false> carry=0;
-    ac_int<2*N,false> result_mid;
-
-    const int half=N/2;
-    ac_int<N,false> op1 = operand_1;
-    ac_int<N,false> op2 = operand_2;
-
-    fh_operand_1=op1.template slc<half>(0);
-    sh_operand_1=op1.template slc< half>(half);
-    fh_operand_2=op2.template slc<half>(0);
-    sh_operand_2=op2.template slc<half>(half);
-
-    p1=fh_operand_1*fh_operand_2;
-    p2=fh_operand_1*sh_operand_2;
-    p3=sh_operand_1*fh_operand_2;
-    p4=sh_operand_1*sh_operand_2;
-    
-    partial_product_1.set_slc(0,p1);
-    partial_product_2.set_slc(N/2,p2);
-    partial_product_3.set_slc(N/2,p3);
-    partial_product_4.set_slc(N,p4);
-
-    full_adder(partial_product_1,partial_product_2,partial_product_3,sum_first,carry_first);
-
-    full_adder(partial_product_4,sum_first,carry_first,sum,carry);
-
-    result_mid=sum+carry;
-    result=result_mid;
-  }
-
-public:
   
   // Constructors
   fast_float() {};
@@ -160,7 +103,7 @@ public:
   *  The addition is implemented using dual path (Far-Near).
   */
   template<RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
-  void fpa_dual(fast_float<M,E> a, fast_float<M,E> &output) {
+  void fpa_dual(const fast_float<M,E> a, fast_float<M,E> &output) {
   
     // Set create needed lengths.
     const int signif_uniform_W = M + 4;
@@ -528,7 +471,7 @@ public:
   
 
   template<RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
-  void fpma_dual(fast_float<M,E> a, fast_float<M,E> b, fast_float<M,E> &output) {
+  void fpma_dual(const fast_float<M,E> a, const fast_float<M,E> b, fast_float<M,E> &output) {
                         
     const bool t_in_a_is_inf = (exponent).and_reduce();
     const bool t_in_c_is_inf = (a.exponent).and_reduce();
@@ -573,7 +516,7 @@ public:
     
     ac_int<mul_W,false> mul_prod1, mul_prod;
     
-    multiply(mul_signif_a, mul_signif_b, mul_prod1);
+    mul_prod1 = mul_signif_a*mul_signif_b;
 
     mul_prod = (DENORMALS) ? mul_prod1 : ((a_denorm || b_denorm) ? (ac_int<mul_W,false>)0 : mul_prod1);
     
@@ -835,7 +778,7 @@ public:
 
  
   template<RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
-  void fpmul(fast_float<M,E> a, fast_float<M,E> &output) {
+  void fpmul(const fast_float<M,E> a, fast_float<M,E> &output) {
 
     static const ac_int<E,false> mul_exp_base = (1 << (E-1)) - 1;
     static const int signif_W = M + 1;
@@ -910,17 +853,16 @@ public:
     // Normalization.
     if (DENORMALS) {
       const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mul_prod.leading_sign();
-      
       if (exp_res==0) {     
         mul_prod >>= right_shift;     
       } else {
         //mul_prod <<= mul_lzc;
-        if (mul_lzc >= exp_res) {	   
+        if (mul_lzc >= exp_res) {	 
           mul_prod <<= exp_res;
 	        exp_res = 0;  
       	} else {
-          mul_prod <<= (mul_lzc+1);
-	        exp_res -= (mul_lzc+1);	
+          mul_prod <<= (mul_lzc <= 1) ? (ac_int<ac::nbits<mul_W>::val,false>)0 : (ac_int<ac::nbits<mul_W>::val,false>)(mul_lzc-1);
+	        exp_res -= (mul_lzc <= 1) ? (ac_int<ac::nbits<mul_W>::val,false>)0 : (ac_int<ac::nbits<mul_W>::val,false>)(mul_lzc-1);	
         }
       }
       
@@ -955,20 +897,24 @@ public:
 
     // TODO: check if moving addition after saves area              
     ac_int<M+2,false> mul_rounded = (mul_overflow) ? mul_prod.template slc<M+1>(inj_point+1) + mul_round : mul_prod.template slc<M+1>(inj_point) + mul_round;
-    
 
     ac_int<1,false> extra_shift = 0;
+    ac_int<1,false> extra_exp = 0;
     // Rounding Overflow Check.
     if (DENORMALS) {
-      if ((exp_res == 1) && mul_rounded[M]) 
-        extra_shift = 1;
+      if ((exp_res == 0) && mul_rounded[M]) {
+        extra_shift = 0;
+        extra_exp = 1;
+      }
     } else {
-      if (mul_rounded[M+1]) 
+      if (mul_rounded[M+1]) {
         extra_shift = 1;
+        extra_exp = 1;
+      }
     } 
     
     exp_t tmp_exp = exp_res.template slc<E>(0);
-    exp_t mul_exp_result = (tmp_exp == (1<<E)-1) ? tmp_exp : (exp_t)(tmp_exp+extra_shift);
+    exp_t mul_exp_result = (tmp_exp == (1<<E)-1) ? tmp_exp : (exp_t)(tmp_exp+extra_exp);
     
     // Infinity Result Check.
     Is_inf = mul_exp_result.and_reduce() |  Is_inf; 
@@ -981,7 +927,7 @@ public:
   
   // TODO : Support for denormals
   template<int N, RND_ENUM RND_MODE=EVEN, bool DENORMALS=false>
-  void dotProd(fast_float<M,E> A[N], fast_float<M,E> B[N]) {
+  void dotProd(const fast_float<M,E> A[N], const fast_float<M,E> B[N]) {
     
     static const ac_int<E,false> mul_exp_base = e_bias;
     static const ac_int<E,false> mul_exp_base_min_1 = e_bias-1;
@@ -1046,7 +992,6 @@ public:
     #pragma hls_unroll
     DO_MUL: for (int i=0; i<N; i++) {
       
-      //multiply(fracA[i], fracB[i], mul_prod[i]);
       mul_prod[i] = fracA[i]*fracB[i];
 
       if (AisZero[i] || BisZero[i]) {
