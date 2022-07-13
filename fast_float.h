@@ -10,6 +10,82 @@
 #include <ac_fixed.h>
 #include <ac_std_float.h>
 
+template <int W>
+bool lzc_reduce (ac_int<W,false> a) {
+    ac_int<W/2,false> odd, even;
+
+
+    // split odd even bits of a
+    #pragma unroll yes
+    SPLIT:for (int i=0; i < W/2; i++) {
+        even[i] = a[2*i];
+        odd[i] = a[2*i+1];
+    }
+
+    // prefix AND from MSB-to-LSB of inverted even bits
+    even = even.bit_complement();
+    ac_int<W/2,false> even_prefix;
+    ac_int<1,false> t=true;
+    
+    #pragma unroll yes
+    PREFIXAND:for (int i=W/2-1; i >=0; i--) {
+        if (i == W/2-1) t = even[i];
+        else t = t & even[i];
+        even_prefix[i] = t;
+    }
+
+    // fix alignment of prefixed and terms
+    even_prefix = even_prefix >> 1;
+    even_prefix[W/2-1] = 1;
+
+    // prepare terms for each bit position
+    ac_int<W/2,false> tmp = even_prefix & odd;
+
+    // return the wide OR of those terms
+    return tmp.or_reduce();
+}
+
+// Version 1: try to do it
+template<int N>
+struct lzc_s {
+        template<typename T>
+        static void lzc(ac_int<N,false> a, T &out) {
+            ac_int<N/2, false> a0;
+            out[ac::log2_ceil<N>::val] = lzc_reduce<N>(a);
+
+            #pragma unroll yes
+            for (int i = 0; i < N / 2; i++) {
+                a0[i] = a[2*i] | a[2*i + 1];
+            }
+            lzc_s<N/2>::lzc(a0,out);
+        }
+};
+
+template<>
+struct lzc_s<1> {
+    template<typename T>
+    static void lzc(ac_int<1,false> a,  T &out) {
+      out[0] = a[0];
+    }
+};
+
+
+//#pragma hls_design top
+template<int N=8>
+ac_int<ac::log2_ceil<N>::val+1,false> mylzc(ac_int<N,false> x) {
+    ac_int<ac::log2_ceil<N>::val+1,false> b,res;
+    lzc_s<N>::lzc(x,b);
+
+    // reverse bits
+    #pragma unroll yes
+    for (int i=0; i< ac::log2_ceil<N>::val+1; i++) {
+      res[i] = b[ac::log2_ceil<N>::val - i];   
+    }
+    
+    // complement them and send them out
+    return  res.bit_complement();
+}
+
 template<int N>
 struct max_s {
   template<typename T>
@@ -422,8 +498,24 @@ public:
     const bool N_no_normalize = N_chosen_sub[signif_uniform_W - 2];
 
 	  bool N_zero = false;
-    const ac_int<ac::nbits<signif_uniform_W-1>::val, false> N_lz_cnt = (N_chosen_sub).leading_sign(N_zero);
-    
+
+    // const ac_int<ac::nbits<signif_uniform_W-1>::val, false> N_lz_cnt = (N_chosen_sub).leading_sign(N_zero);
+    // M+3 = 23 + 3 = 26 
+    // M+3 = 7  + 3 = 10 
+    // M+3 = 3  + 3 = 6 
+    const int ww = (M+3 <= 8)  ? 8  :
+                   (M+3 <= 16) ? 16 :
+                   (M+3 <= 32) ? 32 : 64;
+    const int uu = ww - M - 3;
+    ac_int<ww,false> tcz = 0;
+    #pragma hls_unroll
+    for (int ii=0; ii<M+3; ii++)
+      tcz[ii+uu]=N_chosen_sub[ii];
+    const ac_int<ac::nbits<signif_uniform_W-1>::val, false> N_lz_cnt = mylzc<ww>(tcz);
+    // REMOVE LINE -3
+    // ADD LINES -2 AND -1
+    // CHANGES FOR LEADING ZERO COUNT
+
     if (N_zero) {
 		
 		N_exp_large = 0;
@@ -525,15 +617,44 @@ public:
     ac_int<E+3,true> mul_exp_result1 = (mul_overf) ? mul_exp_overf : mul_exp;
     ac_int<E+3,true> mul_exp_result  = (DENORMALS) ? mul_exp_result1 : ((a_denorm || b_denorm) ? (ac_int<E+3,true>)0 : mul_exp_result1);
     
-    bool mul_zero = false;
-    const int mul_prod_lz_cnt = (mul_prod).leading_sign(mul_zero);
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
+    bool mul_zero = (DENORMALS) ? false : (a_denorm || b_denorm);
+    int mul_prod_lz_cnt = 0;
 
-    if (mul_zero) {
-      mul_exp_result = 0;  
-    } else {
-      mul_prod <<= mul_prod_lz_cnt;
-      mul_exp_result -= mul_prod_lz_cnt; 
+    if (DENORMALS) {
+      // int mul_prod_lz_cnt = (mul_prod).leading_sign(mul_zero);
+      
+
+      // 2*M+2 = 2*(23 + 1) = 48 
+      // 2*M+2 = 2*(7  + 1) = 16 
+      // 2*M+2 = 2*(3  + 1) = 8 
+      const int ww = (2*M+2 <= 8)  ? 8  :
+                     (2*M+2 <= 16) ? 16 :
+                     (2*M+2 <= 32) ? 32 : 64;
+      const int uu = ww - mul_w;
+      ac_int<ww,false> tcz = 0;
+      #pragma hls_unroll
+      for (int ii=0; ii<mul_w; ii++)
+        tcz[ii+uu]=mul_prod[ii];
+      int mul_prod_lz_cnt = mylzc<ww>(tcz);//.leading_sign(mul_zero);
+
+         
+      if (mul_zero) {
+        mul_exp_result = 0;  
+      } else {
+        mul_prod <<= mul_prod_lz_cnt;
+        mul_exp_result -= mul_prod_lz_cnt; 
+      } 
     }
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
+    // ONLY CHANGE FIX IT
 
 
     // Perform the addition
@@ -545,8 +666,7 @@ public:
     const ac_int<1,false> add_eff_sign = mul_sign ^ b.sign;
     
     // Create add significant.
-    ac_int<mul_W,false> add_signif_c = (DENORMALS) ? b.mantissa : ((c_denorm) ? (man_t)0 : b.mantissa);
-    
+    ac_int<mul_W,false> add_signif_c =  (DENORMALS) ? b.mantissa : ((c_denorm) ? (man_t)0 : b.mantissa);
     add_signif_c[M] = (DENORMALS) ? ((c_denorm) ? 0 : 1) : 1;
     
     if (DENORMALS) add_signif_c <<= c_denorm;
@@ -708,7 +828,21 @@ public:
     
     
     bool Near_zero = false;
-    const int Near_lz_cnt = (Near_chosen_sub).leading_sign(Near_zero);
+    //const int Near_lz_cnt = (Near_chosen_sub).leading_sign(Near_zero);
+    
+
+    // 2*M+2 = 2*(23 + 1) = 48 
+    // 2*M+2 = 2*(7  + 1) = 16 
+    // 2*M+2 = 2*(3  + 1) = 8 
+    const int ww = (2*M+2 <= 8)  ? 8  :
+                   (2*M+2 <= 16) ? 16 :
+                   (2*M+2 <= 32) ? 32 : 64;
+    const int uu = ww - mul_W;
+    ac_int<ww,false> tcz = 0;
+    #pragma hls_unroll
+    for (int ii=0; ii<mul_W; ii++)
+      tcz[ii+uu]=Near_chosen_sub[ii];
+    const int Near_lz_cnt = mylzc<ww>(tcz);
     
 
     if (Near_zero) {
@@ -852,7 +986,22 @@ public:
   
     // Normalization.
     if (DENORMALS) {
-      const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mul_prod.leading_sign();
+      // const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mul_prod.leading_sign();
+      
+
+      // 2*M+2 = 2*(23 + 1) = 48 
+      // 2*M+2 = 2*(7  + 1) = 16 
+      // 2*M+2 = 2*(3  + 1) = 8 
+      const int ww = (2*M+2 <= 8)  ? 8  :
+                     (2*M+2 <= 16) ? 16 :
+                     (2*M+2 <= 32) ? 32 : 64;
+      const int uu = ww - mul_W;
+      ac_int<ww,false> tcz = 0;
+      #pragma hls_unroll
+      for (int ii=0; ii<mul_W; ii++)
+        tcz[ii+uu]=mul_prod[ii];
+      const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mylzc<ww>(tcz);
+
       if (exp_res==0) {     
         mul_prod >>= right_shift;     
       } else {
@@ -1048,7 +1197,19 @@ public:
     ac_int<mul_W+N,false> res;
     res = (res_sign) ? res2.template slc<mul_W+N>(0) : res1.template slc<mul_W+N>(0);
     
-    const int lead_zer = res.leading_sign();
+    // const int lead_zer = res.leading_sign();
+    // mul_W+N = (23 + 1)*2 + 4 = 52 (or 56 for dot<8>)
+    // mul_W+N = (7  + 1)*2 + 4 = 20 (or 24 for dot<8>)
+    // mul_W+N = (3  + 1)*2 + 4 = 12 (or 16 for dot<8>)
+    const int ww = (2*M+2+N <= 8)  ? 8  :
+                   (2*M+2+N <= 16) ? 16 :
+                   (2*M+2+N <= 32) ? 32 : 64;
+    const int uu = ww - mul_W - N;
+    ac_int<ww,false> tcz = 0;
+    #pragma hls_unroll
+    for (int ii=0; ii<mul_W+N; ii++)
+      tcz[ii+uu]=res[ii];
+    const int lead_zer = mylzc<ww>(tcz);
 
     res <<= lead_zer;
     maxExp -= (lead_zer);
