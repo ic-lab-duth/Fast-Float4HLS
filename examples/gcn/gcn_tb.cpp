@@ -34,6 +34,10 @@ CCS_MAIN(int argc, char** argv) {
   int* A_col = new int[nZ];
   float* A_val = new float[nZ];
 
+  int* H_row = new int[N+1];
+  int* H_col = new int[feat_nZ];
+  float* H_val = new float[feat_nZ];
+
   float* W1 = new float[I_F*O_F1];
   float* W2 = new float[O_F1*O_F2];
   
@@ -41,10 +45,12 @@ CCS_MAIN(int argc, char** argv) {
 
 
   // read input matrices from txt files
-  read_adj<float, N, nZ>(A_row, A_col, A_val, "../matrices/citeseer_adj.txt");
-  read_data<float, N, I_F>(H, "../matrices/citeseer_feat.txt");
-  read_data<float, I_F, O_F1>(W1, "../matrices/citeseer_weights.txt");
-  read_data<float, O_F1, O_F2>(W2, "../matrices/citeseer_weights2.txt");
+  read_csr<float, N, nZ>(A_row, A_col, A_val, "./matrices/citeseer_adj.txt");
+  read_csr<float, N, feat_nZ>(H_row, H_col, H_val, "./matrices/citeseer_feat.txt");
+  read_data<float, I_F, O_F1>(W1, "./matrices/citeseer_weights.txt");
+  read_data<float, O_F1, O_F2>(W2, "./matrices/citeseer_weights2.txt");
+
+  to_array<float, N, I_F, feat_nZ>(H_row, H_col, H_val, H);
 
   for (int i=0; i < N+1; i++) {
     a_row[i] = A_row[i];
@@ -57,6 +63,14 @@ CCS_MAIN(int argc, char** argv) {
 
   for (int i=0; i < N*I_F; i++) {
     h[i] = H[i];
+  }
+
+  for (int i=0; i < I_F*O_F1; i++) {
+    w1[i] = W1[i];
+  }
+
+  for (int i=0; i < O_F1*O_F2; i++) {
+    w2[i] = W2[i];
   }
 
   //initialize output
