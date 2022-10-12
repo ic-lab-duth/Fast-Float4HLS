@@ -635,10 +635,10 @@ public:
       const int ww = (2*M+2 <= 8)  ? 8  :
                      (2*M+2 <= 16) ? 16 :
                      (2*M+2 <= 32) ? 32 : 64;
-      const int uu = ww - mul_w;
+      const int uu = ww - mul_W;
       ac_int<ww,false> tcz = 0;
       #pragma hls_unroll
-      for (int ii=0; ii<mul_w; ii++)
+      for (int ii=0; ii<mul_W; ii++)
         tcz[ii+uu]=mul_prod[ii];
       int mul_prod_lz_cnt = mylzc<ww>(tcz);//.leading_sign(mul_zero);
 
