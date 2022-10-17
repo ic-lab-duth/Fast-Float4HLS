@@ -33,6 +33,21 @@ Currently the overloaded operators +, -, *, +=, -=, *= compute the corresponding
 * Allow for possible increase the output precision of dot product.
 * Implement Division
 
+# Reference
+
+The architecture and performance of the fused vector dot product unit, implemented as part of the FastFloat4HLS library, was published in the MDPI Journal of Low Power Electronics and Applications on Oct. 2022. You can find the paper [here](https://www.mdpi.com/2079-9268/12/4/56/pdf). To cite this work, please use:
+
+```
+@article{fused-fp-dot,
+author = {Filippas, Dionysios and Nicopoulos, Chrysostomos and Dimitrakopoulos, Giorgos},
+title = {Templatized Fused Vector Floating-Point Dot Product for High-Level Synthesis},
+journal = {Journal of Low Power Electronics and Applications},
+volume = {12},
+year = {2022},
+number = {4},
+article-number = {56},
+```
+
 # Contributors
 
 Currently active: [Dionysios Filippas](https://github.com/dionisisfil), [Christodoulos Peltekis](https://github.com/chrispelt)
