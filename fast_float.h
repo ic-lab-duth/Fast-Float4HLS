@@ -72,18 +72,18 @@ struct lzc_s<1> {
 
 //#pragma hls_design top
 template<int N=8>
-ac_int<ac::log2_ceil<N>::val+1,false> mylzc(ac_int<N,false> x) {
+ac_int<ac::log2_ceil<N>::val+1,false> lzcount(ac_int<N,false> x) {
     ac_int<ac::log2_ceil<N>::val+1,false> b,res;
     lzc_s<N>::lzc(x,b);
 
     // reverse bits
     #pragma unroll yes
     for (int i=0; i< ac::log2_ceil<N>::val+1; i++) {
-      res[i] = b[ac::log2_ceil<N>::val - i];   
+      res[i] = b[ac::log2_ceil<N>::val - i]; 
     }
     
     // complement them and send them out
-    return  res.bit_complement();
+    return (res.or_reduce() == 0) ? (ac_int<ac::log2_ceil<N>::val+1,false>)0 :  res.bit_complement();
 }
 
 template<int N>
@@ -158,17 +158,15 @@ public:
     for (int i=M; i<23; i++)
       data[22-i] = 0;
     
-    ac_int<8,false> tmpExp = exponent - e_bias + 127;
+    ac_int<8,false> tmpExp = (exponent==0) ? ( ac_int<8,false>)0 : ( ac_int<8,false>)(exponent - e_bias + 127);
     for (int i=0; i<8; i++)
       data[23+i] = (exponent == (1<<E)+-1) ? 1 : tmpExp[i];
 
     data[31] = sign;
-    
-    
+
     ac_std_float<32,8> ieee_data;
     ieee_data.set_data(data);
-    return ieee_data.to_float();
-   
+    return  ieee_data.to_float();
   }
 
   /** FLOATING POINT OPERATIONS **/
@@ -196,6 +194,7 @@ public:
       inf_sign = a.sign;
       Is_inf = true;
     }
+  
 
     // End of infinity check.
 
@@ -292,6 +291,8 @@ public:
     	R_unnormal_rounded_sum = R_nsignif_large + R_nsignif_small + 2;
     	
 	  }
+
+    bool Ris_zero = !(R_sum.or_reduce());
 
     // Normalize and overflow check R_sum, R_rounded_sum
     // and R_unnormal_rounded_sum.
@@ -511,7 +512,7 @@ public:
     #pragma hls_unroll
     for (int ii=0; ii<M+3; ii++)
       tcz[ii+uu]=N_chosen_sub[ii];
-    const ac_int<ac::nbits<signif_uniform_W-1>::val, false> N_lz_cnt = mylzc<ww>(tcz);
+    const ac_int<ac::nbits<signif_uniform_W-1>::val, false> N_lz_cnt = lzcount<ww>(tcz);
     // REMOVE LINE -3
     // ADD LINES -2 AND -1
     // CHANGES FOR LEADING ZERO COUNT
@@ -539,6 +540,8 @@ public:
     const bool Is_R1 = (R_abs_exp_diff >= 2);
     const bool Is_R2 = sign_eff & !Is_R1 & N_no_normalize;
     const bool Is_R = !sign_eff | Is_R1 | Is_R2;
+
+    
     
     if (R_exp_result.and_reduce() & Is_R) {
 		Is_inf = true;	
@@ -548,6 +551,9 @@ public:
     man_t tmp_m = (Is_inf) ? ac_int<M,false>(0)            : ((Is_R) ? R_magn_result : N_chosen_sub.template slc<M>(2));
     exp_t tmp_e = (Is_inf) ? ac_int<E,false>((1 << E) - 1) : ((Is_R) ? R_exp_result  : N_exp_large);
 
+
+    bool zero_res = (Is_R) ? Ris_zero : !(N_chosen_sub.or_reduce());
+
     sgn_t tmp_s_A = (in_1_subnorm) ? a.sign     : (sgn_t)0;
     man_t tmp_m_A = (in_1_subnorm) ? a.mantissa : (man_t)0;
     exp_t tmp_e_A = (in_1_subnorm) ? a.exponent : (exp_t)0;
@@ -556,8 +562,8 @@ public:
     man_t tmp_m_B = (in_2_subnorm) ? mantissa : (man_t)0;
     exp_t tmp_e_B = (in_2_subnorm) ? exponent : (exp_t)0;
  
-    output.sign     = (DENORMALS) ? tmp_s : ((in_1_subnorm) ? tmp_s_A : ((in_2_subnorm) ? tmp_s_B : tmp_s));
-    output.exponent = (DENORMALS) ? tmp_e : ((in_1_subnorm) ? tmp_e_A : ((in_2_subnorm) ? tmp_e_B : tmp_e));
+    output.sign     = (DENORMALS) ? tmp_s : ((in_1_subnorm) ? tmp_s_A : ((in_2_subnorm) ? tmp_s_B : ((zero_res) ? (sgn_t)0 : tmp_s)));
+    output.exponent = (DENORMALS) ? tmp_e : ((in_1_subnorm) ? tmp_e_A : ((in_2_subnorm) ? tmp_e_B : ((zero_res) ? (exp_t)0 : tmp_e)));
     output.mantissa = (DENORMALS) ? tmp_m : ((in_1_subnorm) ? tmp_m_A : ((in_2_subnorm) ? tmp_m_B : tmp_m));
   }
   
@@ -568,7 +574,7 @@ public:
     const bool t_in_a_is_inf = (exponent).and_reduce();
     const bool t_in_c_is_inf = (a.exponent).and_reduce();
     const bool t_in_b_is_inf = (b.exponent).and_reduce();
-            
+
     // Start by calculating the multiplication
     
     //Infinite check
@@ -597,14 +603,14 @@ public:
     }
     
     // Calculate exponent result 
-    static const ac_int<E,false> mul_exp_base = (1 << (E-1)) - 1;
-    static const ac_int<E,false> mul_exp_base_min_1 = (1 << (E-1)) - 2;
+    /*static*/ const ac_int<E,false> mul_exp_base = (1 << (E-1)) - 1;
+    /*static*/ const ac_int<E,false> mul_exp_base_min_1 = (1 << (E-1)) - 2;
     const ac_int<E+2,true> mul_exp_overf = exponent + a.exponent - mul_exp_base_min_1;
     const ac_int<E+2,true> mul_exp = exponent + a.exponent - mul_exp_base;
 
     // Do the multiplication.
-    static const int mul_input_W = M + 1;
-    static const int mul_W = (mul_input_W) << 1;
+    /*static*/ const int mul_input_W = M + 1;
+    /*static*/ const int mul_W = (mul_input_W) << 1;
     
     ac_int<mul_W,false> mul_prod1, mul_prod;
     
@@ -640,7 +646,7 @@ public:
       #pragma hls_unroll
       for (int ii=0; ii<mul_W; ii++)
         tcz[ii+uu]=mul_prod[ii];
-      int mul_prod_lz_cnt = mylzc<ww>(tcz);//.leading_sign(mul_zero);
+      int mul_prod_lz_cnt = lzcount<ww>(tcz);//.leading_sign(mul_zero);
 
          
       if (mul_zero) {
@@ -796,7 +802,7 @@ public:
     ac_int<1,false>      Near_sign_large    = (Near_exp_diff[1]) ? b.sign : mul_sign;
     ac_int<mul_W+1,true> Near_nsignif_small = (Near_exp_diff[1]) ? mul_prod : add_signif_c;
 
-
+    
     ac_int<1,false> Near_sticky_hold = 0;
     
 
@@ -842,7 +848,8 @@ public:
     #pragma hls_unroll
     for (int ii=0; ii<mul_W; ii++)
       tcz[ii+uu]=Near_chosen_sub[ii];
-    const int Near_lz_cnt = mylzc<ww>(tcz);
+    const int Near_lz_cnt = lzcount<ww>(tcz);
+    
     
 
     if (Near_zero) {
@@ -861,7 +868,7 @@ public:
     
     // Round.
     
-    static const int inj_point = M + 1;
+    /*static*/ const int inj_point = M + 1;
     
     ac_int<1,false> round;
     switch (RND_MODE) {
@@ -905,8 +912,8 @@ public:
     const ac_int<1,false> inf_sign = (t_in_b_is_inf) ? b.sign : mul_sign;
 
     
-    output.sign = (add_is_inf) ? inf_sign : Chosen_sign_result;
-    output.exponent = (add_is_inf) ? (exp_t)((1 << E) - 1) : Final_exp_result.template slc<E>(0);
+    output.sign = (add_is_inf) ? inf_sign :((zero_res) ? (sgn_t)0 : Chosen_sign_result);
+    output.exponent = (add_is_inf) ? (exp_t)((1 << E) - 1) : ((zero_res) ? (exp_t)0 : Final_exp_result.template slc<E>(0));
     output.mantissa = (add_is_inf) ? (man_t)0 : Final_signif_result.template slc<M>(0);
   }
 
@@ -1000,7 +1007,7 @@ public:
       #pragma hls_unroll
       for (int ii=0; ii<mul_W; ii++)
         tcz[ii+uu]=mul_prod[ii];
-      const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = mylzc<ww>(tcz);
+      const ac_int<ac::nbits<mul_W>::val,false> mul_lzc = lzcount<ww>(tcz);
 
       if (exp_res==0) {     
         mul_prod >>= right_shift;     
@@ -1209,7 +1216,7 @@ public:
     #pragma hls_unroll
     for (int ii=0; ii<mul_W+N; ii++)
       tcz[ii+uu]=res[ii];
-    const int lead_zer = mylzc<ww>(tcz);
+    const int lead_zer = lzcount<ww>(tcz);
 
     res <<= lead_zer;
     maxExp -= (lead_zer);
@@ -1251,26 +1258,95 @@ public:
   
   // OVERLOAD OPERATORS
 
+  // void operator = (const float &inFP) {
+
+  //   ac_int<32,false> in = ((ac_ieee_float<binary32>)inFP).data_ac_int();
+
+  //   // find sign
+  //   sign = in[31];
+    
+  //   // find exponent
+  //   ac_int<9,true> e = in.template slc<8>(23);
+  //   if (e > 0) {
+  //     e -= 127;
+  //     e += e_bias;
+  //   }
+  //   exponent = (e>(1<<E)-1) ? (exp_t)((1<<E)-1) : (e<0) ? (exp_t)0 : (exp_t)e;
+
+  //   // find mantissa
+  //   ac_int<23,false> m = in.template slc<23>(0);
+  //   mantissa = (e>(1<<E)-1) ? (man_t)0 : ((M>23) ? (man_t)((ac_int<M,false>)m<<(M-23)) : (man_t)(m.template slc<M>(23-M)));
+  // }
+
   void operator = (const float &inFP) {
 
-    ac_int<32,false> in = ((ac_ieee_float<binary32>)inFP).data_ac_int();
+    bool iszer = (inFP == 0);
 
-    // find sign
-    sign = in[31];
-    
-    // find exponent
-    ac_int<9,true> e = in.template slc<8>(23);
-    if (e > 0) {
-      e -= 127;
-      e += e_bias;
+    unsigned int_part = (inFP < 0) ? (-inFP) : inFP;
+    float    fra_part = (inFP < 0) ? (-inFP - int_part) : (inFP - int_part);
+
+    ac_int<32,false>     int_bin = int_part;
+    ac_fixed<32,0,false> fra_bin = fra_part;
+
+    int right_shift = -1;
+    if (int_bin > 0) {
+      for (int i = 0; i < 32; i++) {
+        if (int_bin[i] == 1) {
+          right_shift = i;
+        }
+      }
     }
-    exponent = (e>(1<<E)-1) ? (exp_t)((1<<E)-1) : (e<0) ? (exp_t)0 : (exp_t)e;
+    int left_shift = -1;
+    for (int i = 0; i < 32; i++) {
+      if (fra_bin[i] == 1) {
+        left_shift = 32- i;
+      }
+    }
 
-    // find mantissa
-    ac_int<23,false> m = in.template slc<23>(0);
-    mantissa = (e>(1<<E)-1) ? (man_t)0 : ((M>23) ? (man_t)((ac_int<M,false>)m<<(M-23)) : (man_t)(m.template slc<M>(23-M)));
+    ac_int<64,false> bin;
+
+    for(int i = 0; i < 32; i++) {
+      bin[i] = fra_bin[i];
+    }
+    for(int i = 0; i < 32; i++) {
+      bin[32+i] = int_bin[i];
+    }
+
+    int e = 0;
+    if (right_shift >= 0) {
+      bin = bin >> right_shift;
+      e = right_shift;
+    } else if (left_shift >= 0) {
+      bin = bin << left_shift;
+      e = -left_shift;
+    }
+
+    e += e_bias;
+    iszer = iszer | (e<0);
+
+    bool isinf = (e >= ((1 << (E)) - 1));
+
+    if (iszer) {
+      sign = 0;
+      exponent = 0;
+      mantissa = 0;
+    }else if (isinf) {
+      sign = (inFP < 0) ? 1 : 0;
+      exponent = ((1 << (E)) - 1);
+      mantissa = 0;
+    } else {
+      sign = (inFP < 0) ? 1 : 0;
+      exponent = e;
+      mantissa = bin.template slc<M>(32-M);
+    }    
   }
-
+  
+  void operator = (const ac_int<M+E+1,false> &in) {
+    sign = in[M+E];
+    exponent = in.template slc<E>(M);
+    mantissa = in.template slc<M>(0);
+  }
+  
   void operator = (const fast_float<M,E> &in) {
     mantissa = in.mantissa;
     exponent = in.exponent;
