@@ -35,7 +35,7 @@ Currently the overloaded operators +, -, *, +=, -=, *= compute the corresponding
 
 # Reference
 
-The architecture and performance of the fused vector dot product unit, implemented as part of the FastFloat4HLS library, was published in the MDPI Journal of Low Power Electronics and Applications on Oct. 2022. You can find the paper [here](https://www.mdpi.com/2079-9268/12/4/56/pdf). To cite this work, please use:
+The architecture and performance of the fused vector dot product unit, implemented as part of the FastFloat4HLS library, was published in the Journal of Low Power Electronics and Applications on Oct. 2022. You can find the paper [here](https://www.mdpi.com/2079-9268/12/4/56/pdf). To cite this work, please use:
 
 ```
 @article{fused-fp-dot,
