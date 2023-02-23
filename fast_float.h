@@ -12,79 +12,79 @@
 
 template <int W>
 bool lzc_reduce (ac_int<W,false> a) {
-    ac_int<W/2,false> odd, even;
+  ac_int<W/2,false> odd, even;
 
 
-    // split odd even bits of a
-    #pragma unroll yes
-    SPLIT:for (int i=0; i < W/2; i++) {
-        even[i] = a[2*i];
-        odd[i] = a[2*i+1];
-    }
+  // split odd even bits of a
+  #pragma unroll yes
+  SPLIT:for (int i=0; i < W/2; i++) {
+    even[i] = a[2*i];
+    odd[i] = a[2*i+1];
+  }
 
-    // prefix AND from MSB-to-LSB of inverted even bits
-    even = even.bit_complement();
-    ac_int<W/2,false> even_prefix;
-    ac_int<1,false> t=true;
-    
-    #pragma unroll yes
-    PREFIXAND:for (int i=W/2-1; i >=0; i--) {
-        if (i == W/2-1) t = even[i];
-        else t = t & even[i];
-        even_prefix[i] = t;
-    }
+  // prefix AND from MSB-to-LSB of inverted even bits
+  even = even.bit_complement();
+  ac_int<W/2,false> even_prefix;
+  ac_int<1,false> t=true;
+  
+  #pragma unroll yes
+  PREFIXAND:for (int i=W/2-1; i >=0; i--) {
+    if (i == W/2-1) t = even[i];
+    else t = t & even[i];
+    even_prefix[i] = t;
+  }
 
-    // fix alignment of prefixed and terms
-    even_prefix = even_prefix >> 1;
-    even_prefix[W/2-1] = 1;
+  // fix alignment of prefixed and terms
+  even_prefix = even_prefix >> 1;
+  even_prefix[W/2-1] = 1;
 
-    // prepare terms for each bit position
-    ac_int<W/2,false> tmp = even_prefix & odd;
+  // prepare terms for each bit position
+  ac_int<W/2,false> tmp = even_prefix & odd;
 
-    // return the wide OR of those terms
-    return tmp.or_reduce();
+  // return the wide OR of those terms
+  return tmp.or_reduce();
 }
 
 // Version 1: try to do it
 template<int N>
 struct lzc_s {
-        template<typename T>
-        static void lzc(ac_int<N,false> a, T &out) {
-            ac_int<N/2, false> a0;
-            out[ac::log2_ceil<N>::val] = lzc_reduce<N>(a);
+  template<typename T>
+  static void lzc(ac_int<N,false> a, T &out) {
+    ac_int<N/2, false> a0;
+    out[ac::log2_ceil<N>::val] = lzc_reduce<N>(a);
 
-            #pragma unroll yes
-            for (int i = 0; i < N / 2; i++) {
-                a0[i] = a[2*i] | a[2*i + 1];
-            }
-            lzc_s<N/2>::lzc(a0,out);
-        }
+    #pragma unroll yes
+    for (int i = 0; i < N / 2; i++) {
+      a0[i] = a[2*i] | a[2*i + 1];
+    }
+    lzc_s<N/2>::lzc(a0,out);
+  }
 };
 
 template<>
 struct lzc_s<1> {
-    template<typename T>
-    static void lzc(ac_int<1,false> a,  T &out) {
-      out[0] = a[0];
-    }
+  template<typename T>
+  static void lzc(ac_int<1,false> a,  T &out) {
+    out[0] = a[0];
+  }
 };
 
 
-//#pragma hls_design top
 template<int N=8>
 ac_int<ac::log2_ceil<N>::val+1,false> lzcount(ac_int<N,false> x) {
-    ac_int<ac::log2_ceil<N>::val+1,false> b,res;
-    lzc_s<N>::lzc(x,b);
+  ac_int<ac::log2_ceil<N>::val+1,false> b,res;
+  lzc_s<N>::lzc(x,b);
 
-    // reverse bits
-    #pragma unroll yes
-    for (int i=0; i< ac::log2_ceil<N>::val+1; i++) {
-      res[i] = b[ac::log2_ceil<N>::val - i]; 
-    }
-    
-    // complement them and send them out
-    return (res.or_reduce() == 0) ? (ac_int<ac::log2_ceil<N>::val+1,false>)0 :  res.bit_complement();
+  // reverse bits
+  #pragma unroll yes
+  for (int i=0; i< ac::log2_ceil<N>::val+1; i++) {
+    res[i] = b[ac::log2_ceil<N>::val - i]; 
+  }
+
+  // complement them and send them out
+  return (res.or_reduce() == 0) ? (ac_int<ac::log2_ceil<N>::val+1,false>)0 :  res.bit_complement();
 }
+
 
 template<int N>
 struct max_s {
@@ -110,6 +110,7 @@ T max(T *a) {
   return max_s<N>::max(a);
 };
 
+// Fast Float class
 template<int M, int E>
 class fast_float {
 public:
@@ -131,9 +132,13 @@ public:
   
   // Constructors
   fast_float() {};
-  fast_float(const float &in) {
+  fast_float(const ac_int<M+E+1,false> &in) {
     this->operator=(in);
-  };
+  }
+  fast_float(const fast_float<M,E> &in) {
+    this->operator=(in);
+  }
+  ~fast_float() {};
 
   void set(sgn_t s, exp_t e, man_t m) {
     sign = s;
@@ -1257,30 +1262,10 @@ public:
 
   
   // OVERLOAD OPERATORS
-
-  // void operator = (const float &inFP) {
-
-  //   ac_int<32,false> in = ((ac_ieee_float<binary32>)inFP).data_ac_int();
-
-  //   // find sign
-  //   sign = in[31];
-    
-  //   // find exponent
-  //   ac_int<9,true> e = in.template slc<8>(23);
-  //   if (e > 0) {
-  //     e -= 127;
-  //     e += e_bias;
-  //   }
-  //   exponent = (e>(1<<E)-1) ? (exp_t)((1<<E)-1) : (e<0) ? (exp_t)0 : (exp_t)e;
-
-  //   // find mantissa
-  //   ac_int<23,false> m = in.template slc<23>(0);
-  //   mantissa = (e>(1<<E)-1) ? (man_t)0 : ((M>23) ? (man_t)((ac_int<M,false>)m<<(M-23)) : (man_t)(m.template slc<M>(23-M)));
-  // }
-
   void operator = (const float &inFP) {
-
-    bool iszer = (inFP == 0);
+    
+    #ifndef __SYNTHESIS__
+    bool iszer = (inFP == 0) ? true : false;
 
     unsigned int_part = (inFP < 0) ? (-inFP) : inFP;
     float    fra_part = (inFP < 0) ? (-inFP - int_part) : (inFP - int_part);
@@ -1322,23 +1307,16 @@ public:
     }
 
     e += e_bias;
-    iszer = iszer | (e<0);
-
-    bool isinf = (e >= ((1 << (E)) - 1));
-
-    if (iszer) {
-      sign = 0;
-      exponent = 0;
-      mantissa = 0;
-    }else if (isinf) {
-      sign = (inFP < 0) ? 1 : 0;
-      exponent = ((1 << (E)) - 1);
-      mantissa = 0;
-    } else {
-      sign = (inFP < 0) ? 1 : 0;
-      exponent = e;
-      mantissa = bin.template slc<M>(32-M);
-    }    
+    iszer = (iszer || (e<0)) ? true : false;
+    
+    int maxE = ((1 << (E)) - 1);
+    bool isinf = (e >= maxE) ? true : false;
+    
+    sign     = (iszer) ? (sgn_t)0 : ((inFP < 0) ? (sgn_t)1                : (sgn_t)0);
+    exponent = (iszer) ? (exp_t)0 : ((isinf)    ? (exp_t)((1 << (E)) - 1) : (exp_t)e);
+    mantissa = (iszer) ? (man_t)0 : ((isinf)    ? (man_t)0                : (man_t)(bin.template slc<M>(32-M)));
+    
+    #endif
   }
   
   void operator = (const ac_int<M+E+1,false> &in) {
